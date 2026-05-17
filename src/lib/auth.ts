@@ -27,7 +27,7 @@ import type { NextAuthOptions } from 'next-auth';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import { PrismaAdapter } from '@next-auth/prisma-adapter';
 import { compare } from 'bcryptjs';
-import { prisma } from './prisma';
+import { prisma } from '@/lib/prisma';
 
 // Constants
 const SALT_ROUNDS = 12;

@@ -6,6 +6,44 @@ El formato se basa en [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 
 ---
 
+## [0.16.0] - 2026-05-18
+
+### Agregado
+- **FEATURE**: Dashboard de Portafolio con equity curve y métricas (`src/components/trading/portfolio-panel.tsx`)
+  - Portfolio Summary Card: equity, daily P&L, total P&L, unrealized P&L
+  - SVG sparkline que refleja tendencia (alcista/bajista/mixta) basada en P&L
+  - Win Rate circular indicator con color coding (≥60% verde, ≥40% amarillo, <40% rojo)
+  - Métricas: Profit Factor, Total Trades, Ganancia/Pérdida Prom., Best/Worst Trade
+  - Racha actual con iconos (Award para wins, XCircle para losses)
+  - Duración promedio de trades (horas o días)
+  - Lista de posiciones abiertas con P&L no realizado ($ y %)
+  - Botón "Cerrar" por posición (DELETE /api/broker/positions)
+  - Empty states: sin broker, sin posiciones, error con retry
+  - Skeleton loading animation
+- **FEATURE**: Hook `usePortfolio` (`src/hooks/use-portfolio.ts`)
+  - TanStack Query: fetch de /api/broker/portfolio cada 30s
+  - Solo activo cuando broker está conectado
+  - Tipos exportados: PortfolioSnapshot, PortfolioPosition, PortfolioMetrics, PortfolioData
+- **FEATURE**: API `/api/broker/portfolio` mejorada
+  - Ahora incluye `equityHistory` en la respuesta (para equity curve)
+  - Snapshot + positions + metrics + equityHistory
+- **FEATURE**: Tab "Portafolio" agregado al dashboard (icono Wallet)
+  - Pasa `brokerConnected` prop al PortfolioPanel
+- **FEATURE**: 22 nuevos tests de portfolio (261 total)
+  - P&L calculations: daily/total percentage, negative, zero equity
+  - Metric formatting: equity locale, win rate, profit factor (Infinity), duration
+  - Win rate circle SVG stroke-dasharray calculation
+  - Sparkline trend detection: uptrend, downtrend, mixed
+  - Portfolio snapshot interface validation
+  - Performance metrics edge cases: zero trades, all wins, all losses
+  - Position side badge identification
+
+### Cambios
+- **CHANGE**: page.tsx agrega tab "Portafolio" con Wallet icon
+- **CHANGE**: /api/broker/portfolio ahora retorna equityHistory además de snapshot/positions/metrics
+
+---
+
 ## [0.15.0] - 2026-05-18
 
 ### Agregado

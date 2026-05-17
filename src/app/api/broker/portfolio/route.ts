@@ -3,7 +3,13 @@ import { getBroker } from '@/lib/broker/broker-factory';
 import { PositionTracker } from '@/lib/broker/position-tracker';
 
 /**
- * GET /api/broker/portfolio — Get portfolio snapshot + performance metrics
+ * GET /api/broker/portfolio — Get portfolio snapshot + performance metrics + equity history
+ *
+ * Returns:
+ * - snapshot: current equity, P&L, position count
+ * - positions: open positions with unrealized P&L
+ * - metrics: performance statistics (win rate, profit factor, etc.)
+ * - equityHistory: recent equity curve points (for sparkline/chart)
  */
 export async function GET() {
   try {
@@ -15,11 +21,13 @@ export async function GET() {
       tracker.getOpenPositions(),
     ]);
     const metrics = tracker.getPerformanceMetrics();
+    const equityHistory = tracker.getEquityHistory();
 
     return NextResponse.json({
       snapshot,
       positions,
       metrics,
+      equityHistory,
     });
   } catch (error) {
     console.error('[TradeIQ] Failed to get portfolio:', error);

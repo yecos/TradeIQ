@@ -11,6 +11,7 @@ import { AnalysisPanel } from '@/components/trading/analysis-panel';
 import { JournalPanel } from '@/components/trading/journal-panel';
 import { BrokerPanel } from '@/components/trading/broker-panel';
 import { BacktestPanel } from '@/components/trading/backtest-panel';
+import { PortfolioPanel } from '@/components/trading/portfolio-panel';
 import type { Candle, Quote, TechnicalAnalysis, PatternAnalysis, VolumeAnalysis, NewsAnalysis, SentimentAnalysis, MacroAnalysis, ConfluenceResult } from '@/lib/types';
 import type { WSConnectionState } from '@/lib/data/binance-ws';
 import { Button } from '@/components/ui/button';
@@ -24,6 +25,7 @@ import {
   Link2,
   BarChart3,
   FlaskConical,
+  Wallet,
   RefreshCw,
   TrendingUp,
   Target,
@@ -396,6 +398,13 @@ export default function TradeIQDashboard() {
           <Link2 className="w-3 h-3 mr-1" />
           Broker
         </TabsTrigger>
+        <TabsTrigger
+          value="portfolio"
+          className="h-9 text-[10px] data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-emerald-400 data-[state=active]:text-emerald-400 data-[state=active]:shadow-none rounded-none px-3 flex-shrink-0"
+        >
+          <Wallet className="w-3 h-3 mr-1" />
+          Portafolio
+        </TabsTrigger>
       </TabsList>
 
       <div className="flex-1 overflow-hidden">
@@ -440,6 +449,10 @@ export default function TradeIQDashboard() {
             onSave={saveBrokerConfig}
             onDisconnect={disconnectBroker}
           />
+        </TabsContent>
+
+        <TabsContent value="portfolio" className="h-full m-0 p-3 overflow-y-auto custom-scrollbar">
+          <PortfolioPanel brokerConnected={brokerConfig?.isActive ?? false} />
         </TabsContent>
       </div>
     </Tabs>
