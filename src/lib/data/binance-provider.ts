@@ -108,7 +108,7 @@ export class BinanceProvider implements MarketDataProvider {
         if (response.ok) {
           this.activeBaseUrl = url;
           this.healthChecked = true;
-          console.log(`[TradeIQ] Binance connected: ${url}`);
+          console.warn(`[TradeIQ] Binance connected: ${url}`);
           return url;
         }
       } catch {

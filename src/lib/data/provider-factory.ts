@@ -24,9 +24,9 @@ export function getMarketDataProvider(): SmartProvider {
   providerInstance = new SmartProvider(polygonApiKey || undefined);
 
   if (polygonApiKey && polygonApiKey.length > 0) {
-    console.log(`[TradeIQ] SmartProvider active: CoinGecko (crypto) + Binance (crypto backup) + Polygon (stocks) + Mock (fallback)`);
+    console.warn(`[TradeIQ] SmartProvider active: CoinGecko (crypto) + Binance (crypto backup) + Polygon (stocks) + Mock (fallback)`);
   } else {
-    console.log(`[TradeIQ] SmartProvider active: CoinGecko (crypto) + Binance (crypto backup) + Mock (stocks). Set POLYGON_API_KEY for real stock data.`);
+    console.warn(`[TradeIQ] SmartProvider active: CoinGecko (crypto) + Binance (crypto backup) + Mock (stocks). Set POLYGON_API_KEY for real stock data.`);
   }
 
   return providerInstance;
