@@ -1,0 +1,33 @@
+# ─── TradeIQ Docker Compose ────────────────────────────────────────────
+# Local development with PostgreSQL + TradeIQ
+#
+# Usage:
+#   docker compose up -d          # Start all services
+#   docker compose logs -f tradeiq  # View TradeIQ logs
+#   docker compose down            # Stop all services
+
+services:
+  tradeiq:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=file:./db/custom.db
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:-tradeiq-dev-secret-change-in-production}
+      - NEXTAUTH_URL=http://localhost:3000
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
+      - POLYGON_API_KEY=${POLYGON_API_KEY:-}
+    volumes:
+      - tradeiq-db:/app/db
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  tradeiq-db:

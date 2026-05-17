@@ -6,6 +6,35 @@ El formato se basa en [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 
 ---
 
+## [0.19.0] - 2026-05-18
+
+### Agregado
+- **FEATURE**: Dockerfile multi-stage para producción
+  - Stage 1: Install dependencies with bun
+  - Stage 2: Build Next.js standalone + Prisma generate
+  - Stage 3: Production image with non-root user, health check, standalone server
+  - HEALTHCHECK: wget a /api/health cada 30s
+- **FEATURE**: docker-compose.yml para desarrollo local
+  - Servicio tradeiq con volumen persistente para SQLite
+  - Variables de entorno configurables
+  - Health check integrado
+  - Restart policy: unless-stopped
+- **FEATURE**: .dockerignore optimizado (excluye node_modules, .next, db, .env)
+- **FEATURE**: Health Check API (`GET /api/health`)
+  - Status: ok / degraded
+  - Checks: database connectivity (SELECT 1), memory usage (warning > 500MB)
+  - Métricas: uptime, response time, versión, heap used/total/rss en MB
+  - HTTP 200 para ok, 503 para degraded
+- **FEATURE**: .env.example completo con documentación
+  - Database (SQLite dev / PostgreSQL prod)
+  - NextAuth secret + URL
+  - Market data providers (Polygon.io)
+  - Encryption key (broker API keys)
+  - Broker integration (Alpaca)
+  - Monitoring (Sentry, opcional)
+
+---
+
 ## [0.18.0] - 2026-05-18
 
 ### Agregado
