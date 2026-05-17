@@ -16,16 +16,16 @@ import { DataCache } from './market-data-interface';
  * - Stock/ETF symbols → PolygonProvider (if API key set) or MockProvider
  * - Fallback: MockProvider for any symbol that fails
  *
- * PERFORMANCE: All operations have a hard timeout to prevent Vercel
- * serverless function timeouts. We prefer fast partial results over
- * slow complete results.
+ * CRITICAL: Crypto and stock fetches run IN PARALLEL to prevent
+ * serverless function timeouts. If crypto takes 8s, stocks still
+ * return instantly from mock.
  */
 
 /** Maximum time (ms) to wait for any single provider before falling back */
 const PROVIDER_TIMEOUT = 8000;
 
 /** Maximum time (ms) for the entire getMultipleQuotes operation */
-const BATCH_TIMEOUT = 12000;
+const BATCH_TIMEOUT = 10000;
 
 /**
  * Race a promise against a timeout — returns null if the promise takes too long.
@@ -117,57 +117,63 @@ export class SmartProvider implements MarketDataProvider {
     const cryptoSymbols = symbols.filter(isCryptoSymbol);
     const stockSymbols = symbols.filter(s => !isCryptoSymbol(s));
 
+    // ============================================================
+    // CRITICAL: Run crypto and stock fetches IN PARALLEL!
+    // Previously they were sequential — if crypto took 8s from
+    // CoinGecko, the 9s route timeout would expire before stocks
+    // could be fetched. Now both run simultaneously, so stocks
+    // (from mock) return instantly regardless of crypto latency.
+    // ============================================================
+
+    const [cryptoResult, stockResult] = await Promise.allSettled([
+      // Crypto path: CoinGecko → Binance → Mock
+      cryptoSymbols.length > 0
+        ? this.fetchCryptoQuotes(cryptoSymbols)
+        : Promise.resolve([] as Quote[]),
+
+      // Stock path: Polygon or Mock (instant if mock)
+      stockSymbols.length > 0
+        ? this.fetchStockQuotes(stockSymbols)
+        : Promise.resolve([] as Quote[]),
+    ]);
+
     const quotes: Quote[] = [];
 
-    // Fetch crypto quotes — race CoinGecko vs Binance, with mock as safety net
-    if (cryptoSymbols.length > 0) {
-      try {
-        const cryptoQuotes = await withTimeout(
-          this.fetchCryptoQuotes(cryptoSymbols),
-          BATCH_TIMEOUT,
-          'fetchCryptoQuotes'
-        );
+    // Collect crypto quotes
+    if (cryptoResult.status === 'fulfilled' && cryptoResult.value.length > 0) {
+      quotes.push(...cryptoResult.value);
 
-        if (cryptoQuotes && cryptoQuotes.length > 0) {
-          quotes.push(...cryptoQuotes);
-
-          // Fill in any missing crypto with mock
-          const receivedSymbols = new Set(cryptoQuotes.map(q => q.symbol));
-          const missingCrypto = cryptoSymbols.filter(s =>
-            !receivedSymbols.has(s) && !receivedSymbols.has(s.replace('USDT', '').replace('BUSD', ''))
-          );
-
-          if (missingCrypto.length > 0) {
-            const mockQuotes = await this.mock.getMultipleQuotes(missingCrypto);
-            quotes.push(...mockQuotes);
-          }
-        } else {
-          // All providers failed/timed out — use mock for all crypto
-          const mockQuotes = await this.mock.getMultipleQuotes(cryptoSymbols);
-          quotes.push(...mockQuotes);
-        }
-      } catch (error) {
-        console.warn('[TradeIQ] Crypto quote fetch failed entirely, using mock:', error instanceof Error ? error.message : error);
+      // Fill in any missing crypto with mock
+      const receivedSymbols = new Set(cryptoResult.value.map(q => q.symbol));
+      const missingCrypto = cryptoSymbols.filter(s =>
+        !receivedSymbols.has(s) && !receivedSymbols.has(s.replace('USDT', '').replace('BUSD', ''))
+      );
+      if (missingCrypto.length > 0) {
+        const mockQuotes = await this.mock.getMultipleQuotes(missingCrypto);
+        quotes.push(...mockQuotes);
+      }
+    } else {
+      // All crypto providers failed — use mock for ALL crypto
+      if (cryptoSymbols.length > 0) {
         const mockQuotes = await this.mock.getMultipleQuotes(cryptoSymbols);
         quotes.push(...mockQuotes);
       }
     }
 
-    // Fetch stocks from Polygon or Mock (fast, mock is instant)
-    if (stockSymbols.length > 0) {
-      try {
-        const stockResult = await withTimeout(
-          this.getStockProvider().getMultipleQuotes(stockSymbols),
-          PROVIDER_TIMEOUT,
-          'stockQuotes'
-        );
-        if (stockResult && stockResult.length > 0) {
-          quotes.push(...stockResult);
-        } else {
-          const mockQuotes = await this.mock.getMultipleQuotes(stockSymbols);
-          quotes.push(...mockQuotes);
-        }
-      } catch {
+    // Collect stock quotes
+    if (stockResult.status === 'fulfilled' && stockResult.value.length > 0) {
+      quotes.push(...stockResult.value);
+
+      // Fill in any missing stocks with mock
+      const receivedStockSymbols = new Set(stockResult.value.map(q => q.symbol));
+      const missingStocks = stockSymbols.filter(s => !receivedStockSymbols.has(s));
+      if (missingStocks.length > 0) {
+        const mockQuotes = await this.mock.getMultipleQuotes(missingStocks);
+        quotes.push(...mockQuotes);
+      }
+    } else {
+      // Stock providers failed — use mock for ALL stocks
+      if (stockSymbols.length > 0) {
         const mockQuotes = await this.mock.getMultipleQuotes(stockSymbols);
         quotes.push(...mockQuotes);
       }
@@ -235,6 +241,28 @@ export class SmartProvider implements MarketDataProvider {
   // --- Private helpers ---
 
   /**
+   * Fetch stock quotes — tries Polygon first, falls back to Mock (instant).
+   * Runs IN PARALLEL with crypto fetches in getMultipleQuotes.
+   */
+  private async fetchStockQuotes(symbols: string[]): Promise<Quote[]> {
+    const provider = this.getStockProvider();
+    try {
+      const result = await withTimeout(
+        provider.getMultipleQuotes(symbols),
+        5000, // 5s max — mock is instant, Polygon has its own limits
+        `${provider.name}.getMultipleQuotes(stocks)`
+      );
+      if (result && result.length > 0) {
+        return result;
+      }
+    } catch {
+      // Provider failed, fall through to mock
+    }
+    // Fallback to mock
+    return this.mock.getMultipleQuotes(symbols);
+  }
+
+  /**
    * Fetch crypto quotes with intelligent fallback chain.
    * 1. Try CoinGecko batch (fast, one request for all)
    * 2. If CoinGecko fails/times out, try Binance (max 5 symbols)
@@ -264,7 +292,7 @@ export class SmartProvider implements MarketDataProvider {
         const binanceMissing = missing.slice(0, 5);
         const binanceQuotes = await withTimeout(
           this.binance.getMultipleQuotes(binanceMissing),
-          6000,
+          5000, // Reduced from 6s to 5s
           'Binance.getMultipleQuotes(missing)'
         );
         if (binanceQuotes && binanceQuotes.length > 0) {
@@ -282,7 +310,7 @@ export class SmartProvider implements MarketDataProvider {
     const binanceSymbols = symbols.slice(0, 5);
     const binanceResult = await withTimeout(
       this.binance.getMultipleQuotes(binanceSymbols),
-      6000,
+      5000, // Reduced from 6s
       'Binance.getMultipleQuotes'
     );
 
