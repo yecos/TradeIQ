@@ -179,3 +179,136 @@
   border-radius: 8px;
   overflow: hidden;
 }
+
+/* ===== Loading Screen Animations ===== */
+
+/* Animated background grid */
+.loading-grid {
+  width: 100%;
+  height: 100%;
+  background-image:
+    linear-gradient(rgba(16, 185, 129, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(16, 185, 129, 0.03) 1px, transparent 1px);
+  background-size: 60px 60px;
+  animation: gridMove 20s linear infinite;
+}
+
+@keyframes gridMove {
+  0% { transform: translate(0, 0); }
+  100% { transform: translate(60px, 60px); }
+}
+
+/* Floating particles */
+.loading-particle {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: rgba(16, 185, 129, 0.3);
+  animation: particleFloat 4s ease-in-out infinite;
+}
+
+@keyframes particleFloat {
+  0%, 100% { transform: translateY(0) scale(1); opacity: 0.3; }
+  50% { transform: translateY(-80px) scale(1.5); opacity: 0.7; }
+}
+
+/* Logo glow pulse */
+.loading-logo-glow {
+  animation: logoGlow 2s ease-in-out infinite;
+}
+
+@keyframes logoGlow {
+  0%, 100% { box-shadow: 0 0 20px rgba(16, 185, 129, 0.1); }
+  50% { box-shadow: 0 0 40px rgba(16, 185, 129, 0.25), 0 0 80px rgba(16, 185, 129, 0.1); }
+}
+
+/* Icon pulse */
+.loading-icon-pulse {
+  animation: iconPulse 2s ease-in-out infinite;
+}
+
+@keyframes iconPulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.08); opacity: 0.85; }
+}
+
+/* Outer ring pulse */
+.loading-ring-pulse {
+  border: 1px solid rgba(16, 185, 129, 0.1);
+  border-radius: 24px;
+  animation: ringPulse 3s ease-in-out infinite;
+}
+
+@keyframes ringPulse {
+  0%, 100% { transform: scale(1); opacity: 0.5; }
+  50% { transform: scale(1.08); opacity: 0; }
+}
+
+/* Orbiting elements */
+.loading-orbit {
+  animation: orbit 6s linear infinite;
+}
+
+.loading-orbit-delayed {
+  animation: orbit 6s linear infinite;
+  animation-delay: -2s;
+}
+
+.loading-orbit-slow {
+  animation: orbit 8s linear infinite;
+  animation-delay: -4s;
+}
+
+@keyframes orbit {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Progress bar gradient */
+.loading-progress-bar {
+  background: linear-gradient(90deg, #10b981, #34d399, #10b981);
+  background-size: 200% 100%;
+  animation: progressShimmer 1.5s ease-in-out infinite;
+  transition: width 0.5s ease-out;
+}
+
+@keyframes progressShimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Text shimmer effect */
+.loading-text-shimmer {
+  background: linear-gradient(90deg, #6b7280, #9ca3af, #6b7280);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: textShimmer 3s ease-in-out infinite;
+}
+
+@keyframes textShimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Slow spin for loading icons */
+.loading-spin-slow {
+  animation: spinSlow 3s linear infinite;
+}
+
+@keyframes spinSlow {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Pulsing dot for active loading steps */
+.loading-pulse-dot {
+  animation: pulseDot 1.5s ease-in-out infinite;
+}
+
+@keyframes pulseDot {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.4); }
+}

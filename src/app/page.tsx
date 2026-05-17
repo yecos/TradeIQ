@@ -32,6 +32,7 @@ import {
   Clock,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { LoadingScreen } from '@/components/loading-screen';
 
 interface JournalEntry {
   id: string;
@@ -319,6 +320,23 @@ export default function TradeIQDashboard() {
     refetchQuotes();
   }, [refetchQuotes]);
 
+  // Loading screen state — calculate progress based on what's loaded
+  const isQuotesLoaded = quotes.length > 0;
+  const isCandlesLoaded = candles.length > 0;
+  const isStatusLoaded = !!marketStatus;
+  const loadProgress = (
+    (isStatusLoaded ? 30 : 0) +
+    (isQuotesLoaded ? 45 : 0) +
+    (isCandlesLoaded ? 25 : 0)
+  );
+  const loadStep = !isStatusLoaded
+    ? 'Connecting to market data providers...'
+    : !isQuotesLoaded
+    ? 'Fetching watchlist quotes...'
+    : !isCandlesLoaded
+    ? 'Loading chart data...'
+    : 'Ready!';
+
   // Current quote
   const currentQuote = quotes.find(q => q.symbol === selectedSymbol);
   const isLive = marketStatus?.isRealData && !marketStatus?.isFallback;
@@ -328,6 +346,8 @@ export default function TradeIQDashboard() {
 
   return (
     <div className="h-screen flex flex-col trading-bg text-white overflow-hidden">
+      {/* Animated Loading Screen */}
+      <LoadingScreen progress={loadProgress} step={loadStep} />
       {/* HEADER */}
       <header className="h-12 border-b border-white/5 flex items-center justify-between px-4 flex-shrink-0">
         <div className="flex items-center gap-3">
