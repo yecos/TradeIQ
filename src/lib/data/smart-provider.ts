@@ -25,7 +25,7 @@ import { DataCache } from './market-data-interface';
 const PROVIDER_TIMEOUT = 8000;
 
 /** Maximum time (ms) for the entire getMultipleQuotes operation */
-const BATCH_TIMEOUT = 10000;
+const _BATCH_TIMEOUT = 10000;
 
 /**
  * Race a promise against a timeout — returns null if the promise takes too long.
