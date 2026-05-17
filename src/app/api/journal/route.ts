@@ -8,7 +8,7 @@ export async function GET() {
       take: 100,
     });
     return NextResponse.json({ entries });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Failed to fetch journal' }, { status: 500 });
   }
 }
@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
       },
     });
     return NextResponse.json({ entry });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Failed to create journal entry' }, { status: 500 });
   }
 }

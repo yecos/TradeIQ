@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ quote });
     }
     return NextResponse.json({ error: 'Provide symbol or symbols parameter' }, { status: 400 });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Failed to fetch quote' }, { status: 500 });
   }
 }

@@ -9,7 +9,7 @@ interface TradingChartProps {
   symbol: string;
 }
 
-export function TradingChart({ candles, symbol }: TradingChartProps) {
+export function TradingChart({ candles, symbol: _symbol }: TradingChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<ReturnType<typeof createChart> | null>(null);
 
@@ -106,7 +106,7 @@ export function TradingChart({ candles, symbol }: TradingChartProps) {
 
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, [candles, symbol]);
+  }, [candles]);
 
   useEffect(() => {
     const cleanup = initChart();

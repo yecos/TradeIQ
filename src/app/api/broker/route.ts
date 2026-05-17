@@ -5,7 +5,7 @@ export async function GET() {
   try {
     const config = await db.brokerConfig.findFirst();
     return NextResponse.json({ config });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Failed to fetch broker config' }, { status: 500 });
   }
 }
@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json({ config });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Failed to save broker config' }, { status: 500 });
   }
 }

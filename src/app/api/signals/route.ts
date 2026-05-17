@@ -8,7 +8,7 @@ export async function GET() {
       take: 50,
     });
     return NextResponse.json({ signals });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Failed to fetch signals' }, { status: 500 });
   }
 }
@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json({ signal });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Failed to create signal' }, { status: 500 });
   }
 }
@@ -49,7 +49,7 @@ export async function PATCH(request: NextRequest) {
     });
 
     return NextResponse.json({ signal });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Failed to update signal' }, { status: 500 });
   }
 }

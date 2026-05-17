@@ -9,7 +9,7 @@ export async function GET(request: NextRequest) {
   try {
     const candles = await getCandles(symbol, days);
     return NextResponse.json({ symbol, candles });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Failed to fetch candles' }, { status: 500 });
   }
 }

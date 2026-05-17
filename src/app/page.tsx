@@ -90,7 +90,7 @@ export default function TradeIQDashboard() {
   });
 
   // Fetch candles using TanStack Query
-  const { data: candles = [], isLoading: isLoadingChart } = useQuery({
+  const { data: candles = [] } = useQuery({
     queryKey: ['candles', selectedSymbol],
     queryFn: async () => {
       const res = await fetch(`/api/market/candles?symbol=${selectedSymbol}&days=180`);

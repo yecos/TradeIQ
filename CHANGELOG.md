@@ -6,6 +6,28 @@ El formato se basa en [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 
 ---
 
+## [0.5.0] - 2026-05-17
+
+### Agregado
+- **FEATURE**: Vitest configurado con 17 tests (technical-analysis, pattern-detection, confluence-engine)
+- **FEATURE**: Husky + lint-staged — pre-commit hook que ejecuta lint + tests automáticamente
+- **FEATURE**: Scripts de testing: `bun run test`, `bun run test:watch`, `bun run test:coverage`
+- **CHORE**: Branch `develop` creada para git strategy (main = estable, develop = desarrollo)
+- **CHORE**: Base de datos SQLite inicializada y sincronizada
+
+### Cambios
+- **CHANGE**: ESLint ahora es estricto — `no-explicit-any: warn`, `no-unused-vars: warn`, `no-console: warn`, `no-debugger: error`
+- **CHANGE**: TypeScript `noImplicitAny: true` (antes era false)
+- **CHANGE**: Next.js `ignoreBuildErrors: false` y `reactStrictMode: true` (antes eran false)
+- **CHANGE**: package.json nombre cambiado de "nextjs_tailwind_shadcn_ts" a "tradeiq"
+- **FIX**: 12 catch blocks con `error` sin usar cambiados a `catch { }`
+- **FIX**: Variable `isLoadingChart` sin usar eliminada de page.tsx
+- **FIX**: Dependencia innecesaria `symbol` en useCallback de trading-chart.tsx
+- **FIX**: Variable `actionTypes` en use-toast.ts convertida de runtime a type-only
+- **CHORE**: tailwind.config.ts y generate-tradeiq-doc.js agregados a ESLint ignores
+
+---
+
 ## [0.4.0] - 2026-05-17
 
 ### Agregado

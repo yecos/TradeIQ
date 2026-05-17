@@ -7,7 +7,7 @@ export async function GET() {
       orderBy: { createdAt: 'asc' },
     });
     return NextResponse.json({ items });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Failed to fetch watchlist' }, { status: 500 });
   }
 }
@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
       data: { symbol: body.symbol, name: body.name || '' },
     });
     return NextResponse.json({ item });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Failed to add to watchlist' }, { status: 500 });
   }
 }
@@ -31,7 +31,7 @@ export async function DELETE(request: NextRequest) {
     if (!id) return NextResponse.json({ error: 'ID required' }, { status: 400 });
     await db.watchlistItem.delete({ where: { id } });
     return NextResponse.json({ success: true });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Failed to remove from watchlist' }, { status: 500 });
   }
 }
