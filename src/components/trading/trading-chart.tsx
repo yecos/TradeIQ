@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useCallback } from 'react';
 import { createChart, ColorType, CandlestickSeries, HistogramSeries } from 'lightweight-charts';
+import type { Time } from 'lightweight-charts';
 import type { Candle } from '@/lib/types';
 
 interface TradingChartProps {
@@ -74,7 +75,7 @@ export function TradingChart({ candles, symbol: _symbol }: TradingChartProps) {
     // Set data
     if (candles.length > 0) {
       const chartData = candles.map(c => ({
-        time: c.time as number,
+        time: c.time as Time,
         open: c.open,
         high: c.high,
         low: c.low,
@@ -82,7 +83,7 @@ export function TradingChart({ candles, symbol: _symbol }: TradingChartProps) {
       }));
 
       const volumeData = candles.map(c => ({
-        time: c.time as number,
+        time: c.time as Time,
         value: c.volume,
         color: c.close >= c.open ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)',
       }));

@@ -8,7 +8,7 @@ import type { MarketDataProvider, SymbolInfo } from './market-data-interface';
 export class MockProvider implements MarketDataProvider {
   readonly name = 'mock';
 
-  private static readonly SYMBOL_SEEDS: Record<string, { base: number; vol: number; trend: number; name: string }> = {
+  static readonly SYMBOL_SEEDS: Record<string, { base: number; vol: number; trend: number; name: string }> = {
     'AAPL': { base: 195, vol: 3.5, trend: 0.08, name: 'Apple Inc.' },
     'NVDA': { base: 880, vol: 18, trend: 0.15, name: 'NVIDIA Corporation' },
     'MSFT': { base: 420, vol: 5, trend: 0.06, name: 'Microsoft Corporation' },

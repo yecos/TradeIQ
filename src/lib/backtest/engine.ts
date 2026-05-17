@@ -148,7 +148,7 @@ function createTrade(
     id,
     entryDate: date,
     exitDate: null,
-    direction: confluence.overallDirection,
+    direction: confluence.overallDirection as 'LONG' | 'SHORT',
     entryPrice: price,
     exitPrice: null,
     stopLoss: confluence.stopLoss,

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import { getMarketDataProvider, resetProvider, isRealDataAvailable, getProviderName } from '@/lib/data/provider-factory';
 import { MockProvider } from '@/lib/data/mock-provider';
 import { PolygonProvider } from '@/lib/data/polygon-provider';
