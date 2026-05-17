@@ -1,0 +1,79 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model BrokerConfig {
+  id           String   @id @default(cuid())
+  brokerName   String   @default("alpaca")
+  apiKey       String   @default("")
+  apiSecret    String   @default("")
+  isPaper      Boolean  @default(true)
+  isActive     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model VectorConfig {
+  id          String   @id @default(cuid())
+  vectorType  String   // "technical", "pattern", "volume", "news", "sentiment", "macro"
+  vectorName  String   // e.g. "rsi", "macd", "doji", "volume_profile"
+  isEnabled   Boolean  @default(true)
+  weight      Float    @default(1.0)
+  settings    String   @default("{}") // JSON string for vector-specific settings
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model WatchlistItem {
+  id        String   @id @default(cuid())
+  symbol    String   // e.g. "AAPL", "NVDA"
+  name      String   @default("")
+  createdAt DateTime @default(now())
+}
+
+model Signal {
+  id              String   @id @default(cuid())
+  symbol          String
+  direction       String   // "LONG" or "SHORT"
+  entryPrice      Float
+  stopLoss        Float
+  takeProfit      Float
+  riskReward      Float
+  confluenceScore Float    // 0-100
+  vectorsUsed     String   // JSON array of vector names that contributed
+  analysisDetail  String   @default("{}") // JSON with detailed analysis from each vector
+  status          String   @default("active") // "active", "executed", "expired", "cancelled"
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model JournalEntry {
+  id          String   @id @default(cuid())
+  symbol      String
+  direction   String   // "LONG" or "SHORT"
+  entryPrice  Float
+  exitPrice   Float?
+  stopLoss    Float
+  takeProfit  Float
+  result      String?  // "win", "loss", "breakeven", null
+  pnl         Float?
+  notes       String   @default("")
+  lessons     String   @default("")
+  vectorsUsed String   @default("[]") // JSON array
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model AnalysisCache {
+  id        String   @id @default(cuid())
+  symbol    String
+  type      String   // "technical", "pattern", "volume", "news", "sentiment"
+  data      String   // JSON string with analysis results
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
