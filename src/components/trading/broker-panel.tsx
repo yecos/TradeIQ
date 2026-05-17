@@ -11,15 +11,11 @@ import {
   Link2,
   Shield,
   Unlink,
-  TrendingUp,
-  TrendingDown,
-  DollarSign,
   BarChart3,
   RefreshCw,
   AlertTriangle,
   ChevronDown,
   ChevronUp,
-  X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 

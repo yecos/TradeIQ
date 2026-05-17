@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { PositionTracker } from '@/lib/broker/position-tracker';
 import { MockBroker } from '@/lib/broker/mock-broker';
-import type { ClosedTrade } from '@/lib/broker/position-tracker';
+import type { ClosedTrade as _ClosedTrade } from '@/lib/broker/position-tracker';
 
 describe('PositionTracker', () => {
   let broker: MockBroker;

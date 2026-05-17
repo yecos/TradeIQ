@@ -172,7 +172,7 @@ describe('OrderManager', () => {
       // Create a broken broker that throws
       const brokenBroker = new MockBroker();
       // Override submitOrder to throw
-      const originalSubmit = brokenBroker.submitOrder.bind(brokenBroker);
+      const _originalSubmit = brokenBroker.submitOrder.bind(brokenBroker);
       brokenBroker.submitOrder = async () => { throw new Error('Broker unavailable'); };
 
       const om = new OrderManager(brokenBroker, {
