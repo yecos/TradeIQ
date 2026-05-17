@@ -50,7 +50,7 @@ function ScoreGauge({ score, label }: { score: number; label: string }) {
 
 export function AnalysisPanel({ technical, patterns, volume, confluence, news, sentiment, macro }: AnalysisPanelProps) {
   return (
-    <div className="space-y-4 custom-scrollbar max-h-[500px] overflow-y-auto p-1">
+    <div className="space-y-3 sm:space-y-4 custom-scrollbar max-h-[500px] overflow-y-auto p-0.5 sm:p-1">
       {/* Confluence Score */}
       {confluence && (
         <div className="p-3 rounded-lg trading-card-accent">

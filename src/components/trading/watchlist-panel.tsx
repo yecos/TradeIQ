@@ -32,7 +32,7 @@ export function WatchlistPanel({ quotes, isLoading }: WatchlistPanelProps) {
   const { selectedSymbol, setSelectedSymbol } = useAppStore();
 
   return (
-    <div className="space-y-1 custom-scrollbar max-h-[300px] overflow-y-auto">
+    <div className="space-y-0.5 sm:space-y-1 custom-scrollbar max-h-[250px] sm:max-h-[300px] overflow-y-auto">
       {isLoading ? (
         Array.from({ length: 5 }).map((_, i) => (
           <div key={i} className="h-12 rounded-lg bg-white/5 animate-pulse" />
@@ -51,7 +51,7 @@ export function WatchlistPanel({ quotes, isLoading }: WatchlistPanelProps) {
             <button
               key={q.symbol}
               onClick={() => setSelectedSymbol(q.symbol)}
-              className={`w-full flex items-center justify-between p-2.5 rounded-lg transition-all text-left ${
+              className={`w-full flex items-center justify-between p-1.5 sm:p-2.5 rounded-lg transition-all text-left ${
                 isSelected
                   ? 'trading-card-accent glow-green'
                   : 'hover:bg-white/5'
