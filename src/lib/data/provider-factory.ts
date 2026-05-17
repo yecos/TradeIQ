@@ -4,8 +4,9 @@ import { SmartProvider } from './smart-provider';
  * Provider Factory — creates the appropriate market data provider.
  *
  * Strategy:
- * - SmartProvider is now the default (routes crypto→Binance, stocks→Polygon/Mock)
- * - Binance is always free and available (no API key needed)
+ * - SmartProvider is the default (routes crypto→CoinGecko→Binance, stocks→Polygon/Mock)
+ * - CoinGecko is primary for crypto (works from US servers like Vercel)
+ * - Binance is secondary for crypto (may be geo-blocked from US)
  * - Polygon is used for stocks if POLYGON_API_KEY is set
  * - Mock is always the fallback
  *
@@ -23,9 +24,9 @@ export function getMarketDataProvider(): SmartProvider {
   providerInstance = new SmartProvider(polygonApiKey || undefined);
 
   if (polygonApiKey && polygonApiKey.length > 0) {
-    console.warn(`[TradeIQ] SmartProvider active: Binance (crypto) + Polygon (stocks) + Mock (fallback)`);
+    console.log(`[TradeIQ] SmartProvider active: CoinGecko (crypto) + Binance (crypto backup) + Polygon (stocks) + Mock (fallback)`);
   } else {
-    console.warn(`[TradeIQ] SmartProvider active: Binance (crypto) + Mock (stocks). Set POLYGON_API_KEY for real stock data.`);
+    console.log(`[TradeIQ] SmartProvider active: CoinGecko (crypto) + Binance (crypto backup) + Mock (stocks). Set POLYGON_API_KEY for real stock data.`);
   }
 
   return providerInstance;
@@ -58,7 +59,6 @@ export function resetProvider(): void {
 
 /**
  * Check if real market data is available.
- * Binance is always real (free), so this is true unless in fallback mode.
  */
 export function isRealDataAvailable(): boolean {
   return !fallbackToMock;
@@ -84,5 +84,6 @@ export function getActiveProviders(): string[] {
 // Re-export for direct usage
 export { SmartProvider } from './smart-provider';
 export { BinanceProvider, isCryptoSymbol } from './binance-provider';
+export { CoinGeckoProvider } from './coingecko-provider';
 export { MockProvider } from './mock-provider';
 export { PolygonProvider } from './polygon-provider';

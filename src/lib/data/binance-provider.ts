@@ -5,14 +5,15 @@ import type { MarketDataProvider, SymbolInfo } from './market-data-interface';
  * Binance Market Data Provider — free, real-time crypto data.
  * No API key required — all endpoints used are public.
  *
- * Rate limits: 1200 requests/min (very generous)
+ * Rate limits: 1200 requests/min (binance.com), 120/min (binance.us)
  *
- * URL strategy:
- * - Primary: https://api.binance.com (global)
- * - Fallback: https://api.binance.us (US-compliant, works from Vercel/AWS)
+ * URL strategy (optimized for Vercel/US deployments):
+ * - Primary: https://api.binance.us (US-compliant, works from Vercel/AWS)
+ * - Fallback: https://api.binance.com (global, may be geo-blocked from US)
  *
- * If the primary URL fails (geo-blocked from US servers),
- * it automatically falls back to binance.us.
+ * IMPORTANT: binance.us has fewer trading pairs than binance.com.
+ * If a pair is not found on binance.us, the SmartProvider will fall back
+ * to CoinGecko (which works everywhere).
  */
 
 // Well-known crypto symbols with metadata
@@ -39,14 +40,16 @@ const CRYPTO_SEEDS: Record<string, { name: string; pair: string }> = {
   'SUI': { name: 'Sui', pair: 'SUIUSDT' },
 };
 
+// US-first URL order: try binance.us first (works from Vercel/AWS),
+// then binance.com as fallback
 const BINANCE_URLS = [
-  'https://api.binance.com',
   'https://api.binance.us',
+  'https://api.binance.com',
 ];
 
 /**
  * Check if a symbol is likely a cryptocurrency.
- * Used by the SmartProvider to route to Binance.
+ * Used by the SmartProvider to route to crypto providers.
  */
 export function isCryptoSymbol(symbol: string): boolean {
   const upper = symbol.toUpperCase();
@@ -75,14 +78,22 @@ function formatPrice(price: number): number {
   return Math.round(price * 1000000) / 1000000;
 }
 
+/**
+ * Sleep helper for rate limiting.
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 export class BinanceProvider implements MarketDataProvider {
   readonly name = 'binance';
   private activeBaseUrl: string | null = null; // Cached working URL
   private exchangeInfoCache: Map<string, string> | null = null;
+  private healthChecked = false;
 
   /**
    * Get the working Binance base URL.
-   * Tries binance.com first, falls back to binance.us if blocked.
+   * Tries binance.us first (works from US), falls back to binance.com.
    */
   private async getBaseUrl(): Promise<string> {
     // If we already found a working URL, use it
@@ -96,7 +107,8 @@ export class BinanceProvider implements MarketDataProvider {
         });
         if (response.ok) {
           this.activeBaseUrl = url;
-          console.warn(`[TradeIQ] Binance connected: ${url}`);
+          this.healthChecked = true;
+          console.log(`[TradeIQ] Binance connected: ${url}`);
           return url;
         }
       } catch {
@@ -104,8 +116,8 @@ export class BinanceProvider implements MarketDataProvider {
       }
     }
 
-    // If all fail, default to .com (will error upstream with useful message)
-    console.warn('[TradeIQ] All Binance URLs failed health check');
+    // If all fail, default to .us (better chance from US servers)
+    console.warn('[TradeIQ] All Binance URLs failed health check, defaulting to binance.us');
     return BINANCE_URLS[0];
   }
 
@@ -113,7 +125,9 @@ export class BinanceProvider implements MarketDataProvider {
    * Fetch from Binance with automatic URL fallback.
    */
   private async fetchFromBinance<T>(path: string): Promise<T> {
-    const urls = this.activeBaseUrl ? [this.activeBaseUrl, ...BINANCE_URLS.filter(u => u !== this.activeBaseUrl)] : BINANCE_URLS;
+    const urls = this.activeBaseUrl
+      ? [this.activeBaseUrl, ...BINANCE_URLS.filter(u => u !== this.activeBaseUrl)]
+      : BINANCE_URLS;
 
     for (const baseUrl of urls) {
       try {
@@ -126,23 +140,32 @@ export class BinanceProvider implements MarketDataProvider {
           return response.json() as Promise<T>;
         }
 
-        // 451 = geo-blocked, 403 = forbidden — try next URL
-        if (response.status === 451 || response.status === 403) {
-          console.warn(`[TradeIQ] Binance ${baseUrl} blocked (${response.status}), trying fallback...`);
+        // 451 = geo-blocked, 403 = forbidden, 429 = rate limited — try next URL
+        if (response.status === 451 || response.status === 403 || response.status === 429) {
+          console.warn(`[TradeIQ] Binance ${baseUrl} blocked/rate-limited (${response.status}), trying fallback...`);
+          // Clear cached URL so we try the other one next time
+          if (baseUrl === this.activeBaseUrl) this.activeBaseUrl = null;
           continue;
+        }
+
+        // 400 = bad request (symbol not found on this exchange)
+        if (response.status === 400) {
+          const body = await response.text();
+          if (body.includes('Invalid symbol')) {
+            throw new Error(`BINANCE_SYMBOL_NOT_FOUND: Symbol not available on ${baseUrl}`);
+          }
         }
 
         throw new Error(`Binance API error: ${response.status} ${response.statusText}`);
       } catch (error) {
-        if (error instanceof TypeError && error.message.includes('fetch')) {
+        // Network errors — try next URL
+        if (error instanceof TypeError || (error instanceof Error && (error.message.includes('fetch') || error.message.includes('abort')))) {
           console.warn(`[TradeIQ] Binance ${baseUrl} network error, trying fallback...`);
+          if (baseUrl === this.activeBaseUrl) this.activeBaseUrl = null;
           continue;
         }
-        // Re-throw non-network errors (like 4xx other than 451/403)
-        if (error instanceof Error && !error.message.includes('fetch') && !error.message.includes('abort')) {
-          throw error;
-        }
-        continue;
+        // Re-throw application errors (like symbol not found)
+        throw error;
       }
     }
 
@@ -199,20 +222,27 @@ export class BinanceProvider implements MarketDataProvider {
   }
 
   async getMultipleQuotes(symbols: string[]): Promise<Quote[]> {
-    // Binance doesn't have a batch quote endpoint, so we fetch in parallel
-    // (within rate limits — 1200/min is very generous)
-    const quotes = await Promise.all(
-      symbols.map(async (symbol) => {
-        try {
-          return await this.getQuote(symbol);
-        } catch {
-          console.warn(`[TradeIQ] Failed to fetch Binance quote for ${symbol}`);
-          return null;
-        }
-      })
-    );
+    // IMPORTANT: Serialize requests instead of Promise.all to prevent:
+    // 1. Server crashes from too many concurrent fetches
+    // 2. Rate limiting (especially binance.us: 120/min)
+    // 3. Memory pressure from many concurrent responses
+    const quotes: Quote[] = [];
 
-    return quotes.filter((q): q is Quote => q !== null);
+    for (const symbol of symbols) {
+      try {
+        const quote = await this.getQuote(symbol);
+        quotes.push(quote);
+        // Small delay between requests to avoid rate limits
+        if (symbols.indexOf(symbol) < symbols.length - 1) {
+          await sleep(100);
+        }
+      } catch (error) {
+        console.warn(`[TradeIQ] Failed to fetch Binance quote for ${symbol}:`, error instanceof Error ? error.message : error);
+        // Don't add null — let SmartProvider handle fallback per-symbol
+      }
+    }
+
+    return quotes;
   }
 
   async searchSymbols(query: string): Promise<SymbolInfo[]> {

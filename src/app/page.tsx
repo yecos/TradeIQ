@@ -291,6 +291,7 @@ export default function TradeIQDashboard() {
   // Current quote
   const currentQuote = quotes.find(q => q.symbol === selectedSymbol);
   const isLive = marketStatus?.isRealData && !marketStatus?.isFallback;
+  const hasCoinGecko = marketStatus?.activeProviders?.includes('coingecko');
   const hasBinance = marketStatus?.activeProviders?.includes('binance');
   const hasPolygon = marketStatus?.activeProviders?.includes('polygon');
 
@@ -375,16 +376,22 @@ export default function TradeIQDashboard() {
               <WifiOff className="w-3 h-3 text-yellow-500" />
             )}
             <div className="flex items-center gap-1">
-              {hasBinance && (
-                <span className="text-[9px] font-medium text-emerald-400">BIN</span>
+              {hasCoinGecko && (
+                <span className="text-[9px] font-medium text-emerald-400">CG</span>
               )}
-              {hasBinance && hasPolygon && (
+              {hasCoinGecko && hasBinance && (
+                <span className="text-[8px] text-gray-600">+</span>
+              )}
+              {hasBinance && (
+                <span className="text-[9px] font-medium text-yellow-400">BIN</span>
+              )}
+              {(hasCoinGecko || hasBinance) && hasPolygon && (
                 <span className="text-[8px] text-gray-600">+</span>
               )}
               {hasPolygon && (
                 <span className="text-[9px] font-medium text-blue-400">POL</span>
               )}
-              {!hasBinance && !hasPolygon && (
+              {!hasCoinGecko && !hasBinance && !hasPolygon && (
                 <span className="text-[9px] font-medium text-yellow-500">MOCK</span>
               )}
               {marketStatus?.isFallback && (
