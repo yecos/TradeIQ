@@ -1,0 +1,79 @@
+# TradeIQ - AI Development Rules
+# This file is automatically read by Cursor IDE
+# Version: 1.0.0 | 2026-05-17
+
+## CRITICAL: Before ANY code change, you MUST:
+
+1. READ the file you're about to modify (use Read tool, never guess content)
+2. PLAN your changes and present them before executing
+3. USE Edit/MultiEdit for existing files (NEVER use Write to overwrite)
+4. VERIFY with `bun run lint` after changes
+5. UPDATE CHANGELOG.md for every functional change
+
+## Project: TradeIQ
+- Stack: Next.js 16, TypeScript, Prisma + SQLite, shadcn/ui, Tailwind, lightweight-charts v5
+- Repo: https://github.com/yecos/TradeIQ
+- Language: Spanish for UI/docs, English for code/variables
+
+## 10 Golden Rules
+
+### R1 - READ FIRST
+Never write code without reading the target file first.
+
+### R2 - EDIT, DON'T OVERWRITE
+Use Edit/MultiEdit for surgical changes. Only use Write for NEW files.
+
+### R3 - DOCUMENT EVERY CHANGE
+Update CHANGELOG.md after every functional change.
+Format: FEATURE/FIX/CHANGE/REFACTOR/CHORE + file + description
+
+### R4 - VERIFY AFTER CHANGES
+Run `bun run lint` after each significant change. Fix errors before continuing.
+
+### R5 - DON'T BREAK INTERFACES
+Never change an exported function/type signature without updating ALL dependent files.
+Critical files: types.ts, confluence-engine.ts, market-data.ts, schema.prisma
+
+### R6 - PLAN BEFORE CODE
+Present a plan with: files to modify, specific changes, affected dependencies,
+breaking risk, verification method. WAIT for approval before executing.
+
+### R7 - UPDATE WORKLOG
+At session end, update worklog.md with: Task ID, steps taken, results, files changed.
+
+### R8 - NO SECRETS IN CODE
+Never hardcode API keys, tokens, or secrets. Use environment variables.
+
+### R9 - SEPARATION OF CONCERNS
+- Business logic → src/lib/ (not in components)
+- UI → src/components/ (not in lib)
+- Data access → provider pattern (not direct fetch in components)
+- API routes → thin controllers that call lib/
+
+### R10 - STRICT TYPESCRIPT
+No `any` without explicit justification. Define types for everything.
+
+## Architecture Map
+```
+src/lib/types.ts              ← CRITICAL (everyone depends on this)
+src/lib/confluence-engine.ts  ← CRITICAL (core business logic)
+src/lib/technical-analysis.ts ← RSI, MACD, Bollinger, EMA, ADX, ATR
+src/lib/pattern-detection.ts  ← Candlestick patterns
+src/lib/volume-analysis.ts    ← OBV, Accumulation/Distribution
+src/lib/market-data.ts        ← Mock data provider
+src/lib/vector-definitions.ts ← 6 configurable vectors
+src/lib/store.ts              ← Zustand store
+src/app/api/                  ← 7 API endpoints
+src/components/trading/       ← 7 trading components
+prisma/schema.prisma          ← 6 DB models
+```
+
+## Session Flow
+1. Read WORKFLOW.md + CHANGELOG.md + relevant files
+2. Present plan → WAIT for approval
+3. Execute changes surgically
+4. Verify with lint
+5. Update CHANGELOG.md
+6. Update worklog.md at session end
+
+## For full details, read WORKFLOW.md in the repo root.

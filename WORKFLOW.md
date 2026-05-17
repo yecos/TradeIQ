@@ -1,7 +1,31 @@
 # TradeIQ - Flujo de Trabajo de Desarrollo con IA
 
 > **Última actualización**: 2026-05-17
-> **Versión**: 1.0.0
+> **Versión**: 1.1.0
+
+---
+
+## 0. Auto-Discovery: Cómo la IA Encuentra Este Archivo
+
+Este proyecto usa múltiples mecanismos para que cualquier herramienta de IA
+encuentre y siga las reglas automáticamente:
+
+| Archivo | Herramienta que lo lee | Contenido |
+|---------|----------------------|-----------|
+| `WORKFLOW.md` | Todas (lectura manual) | Reglas completas + arquitectura |
+| `.cursorrules` | Cursor IDE (automático) | Reglas resumidas |
+| `CLAUDE.md` | Claude Code (automático) | Reglas resumidas |
+| `.github/copilot-instructions.md` | GitHub Copilot (automático) | Reglas resumidas |
+| `PROMPTS.md` | Todas (referencia manual) | Prompts detallados por feature |
+| `PROMPT-SHORT.md` | Todas (copiar/pegar) | Prompt ultracorto para nueva sesión |
+
+### Para el usuario: Cómo iniciar una sesión con IA
+
+**Opción A (Recomendada)**: Copia el prompt de `PROMPT-SHORT.md` y pégalo al inicio de la conversación. La IA leerá `WORKFLOW.md` automáticamente.
+
+**Opción B (Cursor/Claude Code)**: No necesitas hacer nada. La IA lee `.cursorrules` o `CLAUDE.md` automáticamente.
+
+**Opción C (Con prompt de feature)**: Prompt de `PROMPT-SHORT.md` + prompt específico de `PROMPTS.md` para el feature que quieras trabajar.
 
 ---
 

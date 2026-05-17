@@ -6,6 +6,21 @@ El formato se basa en [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 
 ---
 
+## [0.4.0] - 2026-05-17
+
+### Agregado
+- **DOCS**: .cursorrules - Reglas auto-cargadas por Cursor IDE
+- **DOCS**: CLAUDE.md - Reglas auto-cargadas por Claude Code
+- **DOCS**: .github/copilot-instructions.md - Reglas auto-cargadas por GitHub Copilot
+- **DOCS**: PROMPT-SHORT.md - Prompt ultracorto para iniciar sesiones de IA (4 líneas)
+- **CHANGE**: WORKFLOW.md actualizado a v1.1.0 con sección de Auto-Discovery (sección 0)
+
+### Cambios
+- **CHORE**: Sistema de auto-discovery para que la IA encuentre las reglas sin que el usuario las copie manualmente
+- **CHORE**: 3 archivos de auto-carga para diferentes herramientas de IA (.cursorrules, CLAUDE.md, copilot-instructions.md)
+
+---
+
 ## [0.3.0] - 2026-05-17
 
 ### Agregado
