@@ -12,6 +12,7 @@ import { JournalPanel } from '@/components/trading/journal-panel';
 import { BrokerPanel } from '@/components/trading/broker-panel';
 import { BacktestPanel } from '@/components/trading/backtest-panel';
 import type { Candle, Quote, TechnicalAnalysis, PatternAnalysis, VolumeAnalysis, NewsAnalysis, SentimentAnalysis, MacroAnalysis, ConfluenceResult } from '@/lib/types';
+import type { WSConnectionState } from '@/lib/data/binance-ws';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -30,9 +31,7 @@ import {
   WifiOff,
   X,
   Clock,
-  Menu,
   PanelRight,
-  ChevronLeft,
   List,
   AlertTriangle,
 } from 'lucide-react';
@@ -106,6 +105,15 @@ export default function TradeIQDashboard() {
   const [showWatchlistDrawer, setShowWatchlistDrawer] = useState(false);
   const [showAnalysisDrawer, setShowAnalysisDrawer] = useState(false);
 
+  // WebSocket state from TradingChart
+  const [isRealtimeWS, setIsRealtimeWS] = useState(false);
+  const [wsLatency, setWsLatency] = useState<number | null>(null);
+
+  const handleWSStateChange = useCallback((_state: WSConnectionState, isRealtime: boolean, latencyMs: number | null) => {
+    setIsRealtimeWS(isRealtime);
+    setWsLatency(latencyMs);
+  }, []);
+
   // Only show analysis if it matches the current symbol
   const activeTechnical = analysisForSymbol === selectedSymbol ? technical : null;
   const activePatterns = analysisForSymbol === selectedSymbol ? patterns : null;
@@ -154,9 +162,9 @@ export default function TradeIQDashboard() {
         return [] as Quote[];
       }
     },
-    refetchInterval: 15000,
+    refetchInterval: isRealtimeWS ? 60000 : 15000, // Slower polling when WS is active
     retry: 1,
-    staleTime: 5000,
+    staleTime: isRealtimeWS ? 30000 : 5000,
   });
 
   // Fetch candles using TanStack Query
@@ -177,10 +185,10 @@ export default function TradeIQDashboard() {
         return [] as Candle[];
       }
     },
-    refetchInterval: timeframe === '1m' || timeframe === '5m' ? 10000 :
-                     timeframe === '15m' || timeframe === '1H' ? 30000 : 60000,
+    refetchInterval: isRealtimeWS ? 300000 : (timeframe === '1m' || timeframe === '5m' ? 10000 :
+                     timeframe === '15m' || timeframe === '1H' ? 30000 : 60000),
     retry: 1,
-    staleTime: 10000,
+    staleTime: isRealtimeWS ? 60000 : 10000,
   });
 
   // Symbol search with debounce
@@ -571,18 +579,25 @@ export default function TradeIQDashboard() {
         <div className="flex items-center gap-2 sm:gap-3">
           {/* Data Provider Badge — hidden on very small screens */}
           <div className="hidden sm:flex items-center gap-1 px-2 py-0.5 rounded-full border border-white/10 bg-white/5">
-            {isLive ? (
+            {isRealtimeWS ? (
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+            ) : isLive ? (
               <Wifi className="w-3 h-3 text-emerald-400" />
             ) : (
               <WifiOff className="w-3 h-3 text-yellow-500" />
             )}
             <div className="flex items-center gap-1">
+              {isRealtimeWS && <span className="text-[9px] font-bold text-emerald-400">WS</span>}
+              {isRealtimeWS && wsLatency !== null && <span className="text-[8px] text-gray-500">{wsLatency}ms</span>}
               {hasCoinGecko && <span className="text-[9px] font-medium text-emerald-400">CG</span>}
               {hasCoinGecko && hasBinance && <span className="text-[8px] text-gray-600">+</span>}
               {hasBinance && <span className="text-[9px] font-medium text-yellow-400">BIN</span>}
               {(hasCoinGecko || hasBinance) && hasPolygon && <span className="text-[8px] text-gray-600">+</span>}
               {hasPolygon && <span className="text-[9px] font-medium text-blue-400">POL</span>}
-              {!hasCoinGecko && !hasBinance && !hasPolygon && (
+              {!hasCoinGecko && !hasBinance && !hasPolygon && !isRealtimeWS && (
                 <span className="text-[9px] font-medium text-yellow-500">MOCK</span>
               )}
               {marketStatus?.isFallback && <span className="text-[9px] text-red-400">FB</span>}
@@ -590,7 +605,16 @@ export default function TradeIQDashboard() {
           </div>
 
           {/* Mobile: live dot indicator */}
-          <div className={`sm:hidden w-2 h-2 rounded-full ${isLive ? 'bg-emerald-400' : 'bg-yellow-500'}`} />
+          <div className={`sm:hidden flex items-center gap-1`}>
+            {isRealtimeWS ? (
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+            ) : (
+              <div className={`w-2 h-2 rounded-full ${isLive ? 'bg-emerald-400' : 'bg-yellow-500'}`} />
+            )}
+          </div>
 
           {/* Current Symbol Info */}
           {currentQuote && currentQuote.price != null && (
@@ -681,7 +705,7 @@ export default function TradeIQDashboard() {
             </div>
             {/* Chart Container */}
             <div className="flex-1 rounded-lg overflow-hidden trading-card min-h-0">
-              <TradingChart candles={candles} symbol={selectedSymbol} />
+              <TradingChart candles={candles} symbol={selectedSymbol} timeframe={timeframe} onWSStateChange={handleWSStateChange} />
             </div>
           </div>
 

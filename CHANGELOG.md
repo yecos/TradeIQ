@@ -6,6 +6,94 @@ El formato se basa en [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 
 ---
 
+## [0.15.0] - 2026-05-18
+
+### Agregado
+- **FEATURE**: Autenticación con NextAuth (`src/lib/auth.ts`)
+  - Credentials provider (email + contraseña)
+  - bcrypt password hashing (12 salt rounds)
+  - JWT sessions con expiración de 24h
+  - Type augmentation para session.user.id
+  - `hashPassword()` y `verifyPassword()` para gestión de contraseñas
+- **FEATURE**: Modelos de NextAuth en Prisma (User, Account, Session, VerificationToken)
+  - PrismaAdapter para persistencia de usuarios
+  - Campo `hashedPassword` en modelo User
+  - Relaciones User → Account, User → Session con cascade delete
+- **FEATURE**: Prisma Client Singleton (`src/lib/prisma.ts`)
+  - Previene múltiples conexiones en desarrollo (hot reload)
+  - Logging configurado por ambiente
+- **FEATURE**: API de Registro (`POST /api/auth/register`)
+  - Validación de email y contraseña (mínimo 8 caracteres)
+  - Detección de emails duplicados (sin revelar existencia)
+  - Auto-login después de registro
+- **FEATURE**: Página de Login (`/login`)
+  - Toggle Login / Crear Cuenta
+  - Validación de formularios
+  - Toggle mostrar/ocultar contraseña
+  - Mensajes de error claros
+  - Diseño oscuro profesional consistente con la app
+- **FEATURE**: Middleware con protección de rutas por autenticación
+  - Rutas protegidas: `/api/trade/*`, `/api/broker/*`
+  - Rutas protegidas (POST): `/api/signals`, `/api/journal`
+  - Rutas públicas: `/api/auth/*`, `/api/market/*`
+  - `x-user-id` header inyectado para API routes downstream
+- **FEATURE**: SessionProvider en Providers wrapper
+- **FEATURE**: 16 nuevos tests de autenticación (239 total)
+  - Password hashing: hash, salt uniqueness, empty strings
+  - Password verification: correct, incorrect, case sensitivity
+  - Password security: special chars, unicode, very long
+  - Auth config: structure, JWT strategy, credentials provider, session max age
+  - Registration validation: email format, minimum password length
+
+### Cambios
+- **CHANGE**: Prisma schema actualizado con modelos User, Account, Session, VerificationToken
+- **CHANGE**: Señal y JournalEntry ahora tienen campo `userId` para vincular a usuario
+- **CHANGE**: BrokerConfig ahora tiene campo `userId` para vincular a usuario
+- **CHANGE**: middleware.ts ahora verifica JWT token en rutas protegidas
+- **CHANGE**: Providers.tsx ahora incluye SessionProvider de next-auth
+- **CHANGE**: .env actualizado con NEXTAUTH_SECRET y NEXTAUTH_URL
+
+---
+
+## [0.14.0] - 2026-05-18
+
+### Agregado
+- **FEATURE**: WebSocket en tiempo real con Binance Kline Stream (`src/lib/data/binance-ws.ts`)
+  - Conexión automática a `wss://stream.binance.com:9443/ws/{symbol}@kline_{interval}`
+  - Actualizaciones cada 1-2 segundos (velas que se mueven en vivo como TradingView)
+  - Auto-reconnect con exponential backoff (1s → 2s → 4s → 8s → max 30s)
+  - Fallback automático entre binance.com y binance.us
+  - Connection timeout (10s) y dead connection detection (60s sin mensajes)
+  - `isWSCompatible()` para detectar símbolos crypto compatibles
+  - Singleton pattern con `getBinanceWS()` / `disposeBinanceWS()`
+  - State tracking: disconnected → connecting → connected → reconnecting
+  - Latency tracking basado en event timestamp vs local time
+- **FEATURE**: React Hook `useRealtimeCandles` (`src/hooks/use-realtime-candles.ts`)
+  - Merge automático: velas históricas REST + updates WebSocket en tiempo real
+  - Actualiza última vela (misma timeframe) o agrega nueva vela (nuevo período)
+  - Preserva High máximo y Low mínimo de la vela formándose
+  - Solo activa para símbolos crypto (stocks/ETFs usan polling normal)
+- **FEATURE**: TradingChart mejorado con actualización incremental
+  - `update()` de lightweight-charts para animación suave sin re-render completo
+  - Indicador "LIVE" con ping animado sobre el gráfico cuando WS está conectado
+  - Indicador "CONECTANDO" cuando WS está estableciendo conexión
+  - Auto-scroll inteligente: mantiene visible la última vela solo si usuario está cerca
+- **FEATURE**: Indicador WebSocket en header
+  - Badge "WS" con dot animado verde cuando hay conexión en tiempo real
+  - Latencia en ms mostrada al lado del indicador
+  - Reduce polling REST automáticamente cuando WS está activo (15s → 60s quotes, 10s → 300s candles)
+- **FEATURE**: 24 nuevos tests (223 total)
+  - Tests de BinanceKlineWS: compatibilidad, estado, singleton, dispose, subscripciones
+  - Tests de Candle Merging: merge de vela formándose, nueva vela, vela antigua, actualizaciones rápidas
+
+### Cambios
+- **CHANGE**: TradingChart ahora acepta props `timeframe` y `onWSStateChange`
+- **CHANGE**: page.tsx pasa `timeframe` al componente TradingChart
+- **CHANGE**: page.tsx muestra indicador WS en el header con ping animado
+- **CHANGE**: TanStack Query refetchInterval reducido cuando WebSocket está activo
+
+---
+
 ## [0.13.0] - 2026-05-18
 
 ### Agregado

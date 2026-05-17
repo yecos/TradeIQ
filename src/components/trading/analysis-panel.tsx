@@ -52,7 +52,7 @@ function ScoreGauge({ score, label }: { score: number; label: string }) {
   );
 }
 
-function TimeframeCard({ tf, direction }: { tf: TimeframeRecommendation; direction: string }) {
+function TimeframeCard({ tf }: { tf: TimeframeRecommendation }) {
   const strategyColors: Record<string, string> = {
     scalping: 'from-orange-500/20 to-orange-600/5 border-orange-500/30',
     intraday: 'from-blue-500/20 to-blue-600/5 border-blue-500/30',
@@ -196,7 +196,7 @@ export function AnalysisPanel({ technical, patterns, volume, confluence, news, s
 
       {/* Timeframe & Duration Recommendation */}
       {confluence?.timeframeRecommendation && (
-        <TimeframeCard tf={confluence.timeframeRecommendation} direction={confluence.overallDirection} />
+        <TimeframeCard tf={confluence.timeframeRecommendation} />
       )}
 
       {/* Technical Indicators */}
