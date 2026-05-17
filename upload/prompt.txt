@@ -1,0 +1,11 @@
+Estoy trabajando en TradeIQ (https://github.com/yecos/TradeIQ), una plataforma
+de trading semi-automática con Next.js 16 + TypeScript.
+
+ANTES de escribir cualquier código, LEE estos archivos del repo en orden:
+1. WORKFLOW.md — Reglas obligatorias de desarrollo (10 reglas)
+2. CHANGELOG.md — Estado actual del proyecto
+3. docs/adr/ — Decisiones de arquitectura
+
+Después de leerlos, SIGUE las reglas de WORKFLOW.md estrictamente.
+Confirma que leíste WORKFLOW.md diciendo:
+"✅ Workflow TradeIQ cargado. ¿Qué necesitas?"
