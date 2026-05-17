@@ -33,7 +33,7 @@ export class MockProvider implements MarketDataProvider {
     'LINK': { base: 15, vol: 0.8, trend: 0.08, name: 'Chainlink', type: 'crypto' },
   };
 
-  async getCandles(symbol: string, days: number = 180): Promise<Candle[]> {
+  async getCandles(symbol: string, days: number = 180, _interval: string = '1D'): Promise<Candle[]> {
     return generateRealisticCandles(symbol, days);
   }
 

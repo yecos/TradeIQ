@@ -29,6 +29,7 @@ import {
   Wifi,
   WifiOff,
   X,
+  Clock,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -73,6 +74,8 @@ export default function TradeIQDashboard() {
     signals,
     addSignal,
     watchlist,
+    timeframe,
+    setTimeframe,
   } = useAppStore();
 
   const [technical, setTechnical] = useState<TechnicalAnalysis | null>(null);
@@ -120,13 +123,25 @@ export default function TradeIQDashboard() {
 
   // Fetch candles using TanStack Query — refetch every 60s
   const { data: candles = [] } = useQuery({
-    queryKey: ['candles', selectedSymbol],
+    queryKey: ['candles', selectedSymbol, timeframe],
     queryFn: async () => {
-      const res = await fetch(`/api/market/candles?symbol=${selectedSymbol}&days=180`);
+      // Map timeframe to days for the API
+      const daysForTimeframe: Record<string, number> = {
+        '1m': 1,
+        '5m': 2,
+        '15m': 5,
+        '1H': 30,
+        '4H': 90,
+        '1D': 180,
+        '1W': 365,
+      };
+      const days = daysForTimeframe[timeframe] || 180;
+      const res = await fetch(`/api/market/candles?symbol=${selectedSymbol}&days=${days}&interval=${timeframe}`);
       const data = await res.json();
       return (data.candles || []) as Candle[];
     },
-    refetchInterval: 60000, // 1min for candle updates
+    refetchInterval: timeframe === '1m' || timeframe === '5m' ? 10000 :
+                     timeframe === '15m' || timeframe === '1H' ? 30000 : 60000,
   });
 
   // Symbol search with debounce
@@ -470,9 +485,37 @@ export default function TradeIQDashboard() {
 
         {/* CENTER - CHART */}
         <main className="flex-1 flex flex-col overflow-hidden">
-          {/* Chart Area */}
-          <div className="flex-1 p-2 min-h-0">
-            <div className="w-full h-full rounded-lg overflow-hidden trading-card">
+          {/* Timeframe Selector + Chart */}
+          <div className="flex-1 p-2 min-h-0 flex flex-col">
+            {/* Timeframe Bar */}
+            <div className="flex items-center gap-1 mb-1 px-1">
+              <Clock className="w-3 h-3 text-gray-500 mr-1" />
+              {(['1m', '5m', '15m', '1H', '4H', '1D', '1W'] as const).map((tf) => (
+                <button
+                  key={tf}
+                  onClick={() => setTimeframe(tf)}
+                  className={`px-2 py-0.5 text-[10px] font-medium rounded transition-colors ${
+                    timeframe === tf
+                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                      : 'text-gray-500 hover:text-gray-300 hover:bg-white/5 border border-transparent'
+                  }`}
+                >
+                  {tf}
+                </button>
+              ))}
+              <div className="ml-auto flex items-center gap-2">
+                {currentQuote && (
+                  <span className="text-[10px] text-gray-500">
+                    O: <span className="text-gray-300">${currentQuote.open.toFixed(2)}</span>
+                    {' '}H: <span className="text-gray-300">${currentQuote.high.toFixed(2)}</span>
+                    {' '}L: <span className="text-gray-300">${currentQuote.low.toFixed(2)}</span>
+                    {' '}C: <span className={currentQuote.change >= 0 ? 'text-emerald-400' : 'text-red-400'}>${currentQuote.price.toFixed(2)}</span>
+                  </span>
+                )}
+              </div>
+            </div>
+            {/* Chart Container */}
+            <div className="flex-1 rounded-lg overflow-hidden trading-card min-h-0">
               <TradingChart candles={candles} symbol={selectedSymbol} />
             </div>
           </div>

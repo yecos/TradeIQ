@@ -13,9 +13,9 @@
 import type { Candle, Quote } from './types';
 import { getMarketDataProvider } from './data/provider-factory';
 
-export async function getCandles(symbol: string, days: number = 180): Promise<Candle[]> {
+export async function getCandles(symbol: string, days: number = 180, interval: string = '1D'): Promise<Candle[]> {
   const provider = getMarketDataProvider();
-  return provider.getCandles(symbol, days);
+  return provider.getCandles(symbol, days, interval);
 }
 
 export async function getQuote(symbol: string): Promise<Quote> {

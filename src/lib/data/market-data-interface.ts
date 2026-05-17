@@ -27,7 +27,7 @@ interface CacheEntry<T> {
 export interface MarketDataProvider {
   readonly name: string;
 
-  getCandles(symbol: string, days?: number): Promise<Candle[]>;
+  getCandles(symbol: string, days?: number, interval?: string): Promise<Candle[]>;
   getQuote(symbol: string): Promise<Quote>;
   getMultipleQuotes(symbols: string[]): Promise<Quote[]>;
   searchSymbols(query: string): Promise<SymbolInfo[]>;

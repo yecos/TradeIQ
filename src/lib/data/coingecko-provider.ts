@@ -68,8 +68,8 @@ export class CoinGeckoProvider implements MarketDataProvider {
   private batchCache: { data: Map<string, Quote>; timestamp: number } | null = null;
   private batchCacheTtl = 30_000; // 30 seconds
 
-  async getCandles(symbol: string, days: number = 180): Promise<Candle[]> {
-    const cacheKey = `${symbol}-${days}`;
+  async getCandles(symbol: string, days: number = 180, interval: string = '1D'): Promise<Candle[]> {
+    const cacheKey = `${symbol}-${days}-${interval}`;
     const cached = this.candleCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < this.candleCacheTtl) {
       return cached.data;
@@ -77,8 +77,14 @@ export class CoinGeckoProvider implements MarketDataProvider {
 
     const coinId = this.getCoinId(symbol);
 
+    // CoinGecko free API only provides daily+ candles.
+    // For intraday intervals (1m, 5m, 15m, 1H, 4H), throw error so SmartProvider falls back to Binance.
+    const isDaily = ['1D', '1W'].includes(interval);
+    if (!isDaily) {
+      throw new Error('CoinGecko does not support intraday intervals on free tier. Use Binance instead.');
+    }
+
     // CoinGecko OHLC only accepts specific day values: 1, 7, 14, 30, 90, 180, 365
-    // Find the smallest valid value that covers the requested days
     const validDays = [1, 7, 14, 30, 90, 180, 365];
     const cgDays = validDays.find(d => d >= days) || 365;
 
@@ -94,12 +100,15 @@ export class CoinGeckoProvider implements MarketDataProvider {
 
     const ohlcData: number[][] = await response.json();
 
-    // CoinGecko OHLC returns sub-daily candles:
-    // 1 day → 30min, 7-30 days → 4h, 90+ days → 4h
-    // We aggregate into daily candles for lightweight-charts
-    const candles = this.aggregateToDaily(ohlcData);
+    // CoinGecko OHLC returns sub-daily candles that we aggregate to daily
+    let candles = this.aggregateToDaily(ohlcData);
 
-    // Trim to requested number of days
+    // For weekly, aggregate daily into weekly
+    if (interval === '1W') {
+      candles = this.aggregateToWeekly(candles);
+    }
+
+    // Trim to requested number of candles
     const trimmed = candles.slice(-days);
 
     this.candleCache.set(cacheKey, { data: trimmed, timestamp: Date.now() });
@@ -262,6 +271,54 @@ export class CoinGeckoProvider implements MarketDataProvider {
       }));
 
     return candles;
+  }
+
+  /**
+   * Aggregate daily candles into weekly candles.
+   */
+  private aggregateToWeekly(dailyCandles: Candle[]): Candle[] {
+    if (dailyCandles.length === 0) return [];
+
+    const weeklyMap = new Map<number, { open: number; high: number; low: number; close: number; volume: number; time: number }>();
+
+    for (const c of dailyCandles) {
+      const date = new Date(c.time * 1000);
+      // Get Monday of the week
+      const dayOfWeek = date.getUTCDay();
+      const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+      const monday = new Date(date);
+      monday.setUTCDate(date.getUTCDate() + mondayOffset);
+      const weekStart = Date.UTC(monday.getUTCFullYear(), monday.getUTCMonth(), monday.getUTCDate());
+      const weekTimestamp = Math.floor(weekStart / 1000);
+
+      const existing = weeklyMap.get(weekTimestamp);
+      if (existing) {
+        existing.high = Math.max(existing.high, c.high);
+        existing.low = Math.min(existing.low, c.low);
+        existing.close = c.close;
+        existing.volume += c.volume;
+      } else {
+        weeklyMap.set(weekTimestamp, {
+          open: c.open,
+          high: c.high,
+          low: c.low,
+          close: c.close,
+          volume: c.volume,
+          time: weekTimestamp,
+        });
+      }
+    }
+
+    return Array.from(weeklyMap.values())
+      .sort((a, b) => a.time - b.time)
+      .map(c => ({
+        time: c.time,
+        open: formatPrice(c.open),
+        high: formatPrice(c.high),
+        low: formatPrice(c.low),
+        close: formatPrice(c.close),
+        volume: c.volume,
+      }));
   }
 }
 

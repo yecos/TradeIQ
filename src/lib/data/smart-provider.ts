@@ -45,23 +45,23 @@ export class SmartProvider implements MarketDataProvider {
     }
   }
 
-  async getCandles(symbol: string, days: number = 180): Promise<Candle[]> {
+  async getCandles(symbol: string, days: number = 180, interval: string = '1D'): Promise<Candle[]> {
     if (isCryptoSymbol(symbol)) {
-      // Try CoinGecko first (works from US), then Binance, then Mock
-      return this.getCandlesWithFallback(symbol, days, [
-        this.coingecko,
-        this.binance,
-        this.mock,
-      ]);
+      // For intraday crypto, try Binance first (CoinGecko free doesn't support intraday)
+      // For daily/weekly, try CoinGecko first (more reliable from US servers)
+      const providers = ['1D', '1W'].includes(interval)
+        ? [this.coingecko, this.binance, this.mock]
+        : [this.binance, this.coingecko, this.mock];
+      return this.getCandlesWithFallback(symbol, days, interval, providers);
     }
 
     // Stocks: Polygon or Mock
     const provider = this.getStockProvider();
     try {
-      return await provider.getCandles(symbol, days);
+      return await provider.getCandles(symbol, days, interval);
     } catch {
       console.warn(`[TradeIQ] ${provider.name} failed for getCandles(${symbol}), using mock`);
-      return this.mock.getCandles(symbol, days);
+      return this.mock.getCandles(symbol, days, interval);
     }
   }
 
@@ -237,21 +237,22 @@ export class SmartProvider implements MarketDataProvider {
   private async getCandlesWithFallback(
     symbol: string,
     days: number,
+    interval: string,
     providers: MarketDataProvider[]
   ): Promise<Candle[]> {
     for (const provider of providers) {
       try {
-        const candles = await provider.getCandles(symbol, days);
+        const candles = await provider.getCandles(symbol, days, interval);
         if (candles.length > 0) return candles;
       } catch (error) {
         console.warn(
-          `[TradeIQ] ${provider.name} failed for getCandles(${symbol}):`,
+          `[TradeIQ] ${provider.name} failed for getCandles(${symbol}, ${interval}):`,
           error instanceof Error ? error.message : 'unknown error'
         );
       }
     }
     // Last resort: generate mock
-    return this.mock.getCandles(symbol, days);
+    return this.mock.getCandles(symbol, days, interval);
   }
 
   private getStockProvider(): MarketDataProvider {

@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useMemo } from 'react';
 import { createChart, ColorType, CandlestickSeries, HistogramSeries } from 'lightweight-charts';
-import type { Time } from 'lightweight-charts';
+import type { Time, IChartApi, ISeriesApi } from 'lightweight-charts';
 import type { Candle } from '@/lib/types';
 
 interface TradingChartProps {
@@ -10,18 +10,37 @@ interface TradingChartProps {
   symbol: string;
 }
 
-export function TradingChart({ candles, symbol: _symbol }: TradingChartProps) {
+export function TradingChart({ candles, symbol }: TradingChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
-  const chartRef = useRef<ReturnType<typeof createChart> | null>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const candlestickSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
+  const prevSymbolRef = useRef<string>('');
 
-  const initChart = useCallback(() => {
+  // Memoize chart data transformation
+  const chartData = useMemo(() => {
+    if (!candles.length) return { candles: [], volume: [] };
+
+    const candlesMapped = candles.map(c => ({
+      time: c.time as Time,
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close,
+    }));
+
+    const volumeMapped = candles.map(c => ({
+      time: c.time as Time,
+      value: c.volume,
+      color: c.close >= c.open ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+    }));
+
+    return { candles: candlesMapped, volume: volumeMapped };
+  }, [candles]);
+
+  // Create chart once on mount
+  useEffect(() => {
     if (!chartContainerRef.current) return;
-
-    // Clean up existing chart
-    if (chartRef.current) {
-      chartRef.current.remove();
-      chartRef.current = null;
-    }
 
     const container = chartContainerRef.current;
 
@@ -47,6 +66,7 @@ export function TradingChart({ candles, symbol: _symbol }: TradingChartProps) {
       timeScale: {
         borderColor: 'rgba(255, 255, 255, 0.06)',
         timeVisible: true,
+        secondsVisible: false,
       },
       width: container.clientWidth,
       height: container.clientHeight,
@@ -72,28 +92,9 @@ export function TradingChart({ candles, symbol: _symbol }: TradingChartProps) {
       scaleMargins: { top: 0.85, bottom: 0 },
     });
 
-    // Set data
-    if (candles.length > 0) {
-      const chartData = candles.map(c => ({
-        time: c.time as Time,
-        open: c.open,
-        high: c.high,
-        low: c.low,
-        close: c.close,
-      }));
-
-      const volumeData = candles.map(c => ({
-        time: c.time as Time,
-        value: c.volume,
-        color: c.close >= c.open ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)',
-      }));
-
-      candlestickSeries.setData(chartData);
-      volumeSeries.setData(volumeData);
-      chart.timeScale().fitContent();
-    }
-
     chartRef.current = chart;
+    candlestickSeriesRef.current = candlestickSeries;
+    volumeSeriesRef.current = volumeSeries;
 
     // Handle resize
     const handleResize = () => {
@@ -105,20 +106,32 @@ export function TradingChart({ candles, symbol: _symbol }: TradingChartProps) {
       }
     };
 
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, [candles]);
+    const resizeObserver = new ResizeObserver(handleResize);
+    resizeObserver.observe(container);
 
-  useEffect(() => {
-    const cleanup = initChart();
     return () => {
-      cleanup?.();
-      if (chartRef.current) {
-        chartRef.current.remove();
-        chartRef.current = null;
-      }
+      resizeObserver.disconnect();
+      chart.remove();
+      chartRef.current = null;
+      candlestickSeriesRef.current = null;
+      volumeSeriesRef.current = null;
     };
-  }, [initChart]);
+  }, []);
+
+  // Update data when candles or symbol change (without recreating chart)
+  useEffect(() => {
+    if (!candlestickSeriesRef.current || !volumeSeriesRef.current) return;
+    if (chartData.candles.length === 0) return;
+
+    candlestickSeriesRef.current.setData(chartData.candles);
+    volumeSeriesRef.current.setData(chartData.volume);
+
+    // If symbol changed, fit content. If just data update, keep scroll position.
+    if (prevSymbolRef.current !== symbol) {
+      chartRef.current?.timeScale().fitContent();
+      prevSymbolRef.current = symbol;
+    }
+  }, [chartData, symbol]);
 
   return (
     <div className="relative w-full h-full">

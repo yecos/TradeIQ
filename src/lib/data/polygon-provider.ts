@@ -27,10 +27,13 @@ export class PolygonProvider implements MarketDataProvider {
     this.cache = cache;
   }
 
-  async getCandles(symbol: string, days: number = 180): Promise<Candle[]> {
-    const cacheKey = `candles:${symbol}:${days}`;
+  async getCandles(symbol: string, days: number = 180, interval: string = '1D'): Promise<Candle[]> {
+    const cacheKey = `candles:${symbol}:${days}:${interval}`;
     const cached = this.cache.get<Candle[]>(cacheKey);
     if (cached) return cached;
+
+    // Map our interval format to Polygon timespan/multiplier
+    const { multiplier, timespan } = toPolygonTimespan(interval);
 
     const endDate = new Date();
     const startDate = new Date();
@@ -40,7 +43,7 @@ export class PolygonProvider implements MarketDataProvider {
     const toDate = formatDate(endDate);
 
     const data = await this.fetchFromApi<PolygonAggsResponse>(
-      `/v2/aggs/ticker/${symbol}/range/1/day/${fromDate}/${toDate}?adjusted=true&sort=asc&limit=50000`
+      `/v2/aggs/ticker/${symbol}/range/${multiplier}/${timespan}/${fromDate}/${toDate}?adjusted=true&sort=asc&limit=50000`
     );
 
     const candles: Candle[] = (data.results || []).map((agg) => ({
@@ -209,6 +212,24 @@ export class PolygonProvider implements MarketDataProvider {
 }
 
 // --- Utility functions ---
+
+/**
+ * Convert our timeframe format to Polygon multiplier/timespan.
+ * Our format: '1m', '5m', '15m', '1H', '4H', '1D', '1W'
+ * Polygon format: multiplier + timespan (e.g., 1 minute, 5 minute, 1 hour, 1 day, 1 week)
+ */
+function toPolygonTimespan(interval: string): { multiplier: number; timespan: string } {
+  const map: Record<string, { multiplier: number; timespan: string }> = {
+    '1m':  { multiplier: 1,  timespan: 'minute' },
+    '5m':  { multiplier: 5,  timespan: 'minute' },
+    '15m': { multiplier: 15, timespan: 'minute' },
+    '1H':  { multiplier: 1,  timespan: 'hour' },
+    '4H':  { multiplier: 4,  timespan: 'hour' },
+    '1D':  { multiplier: 1,  timespan: 'day' },
+    '1W':  { multiplier: 1,  timespan: 'week' },
+  };
+  return map[interval] || { multiplier: 1, timespan: 'day' };
+}
 
 function formatDate(date: Date): string {
   return date.toISOString().split('T')[0]; // YYYY-MM-DD

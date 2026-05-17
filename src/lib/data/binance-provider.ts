@@ -79,6 +79,24 @@ function formatPrice(price: number): number {
 }
 
 /**
+ * Convert our timeframe format to Binance interval format.
+ * Our format: '1m', '5m', '15m', '1H', '4H', '1D', '1W'
+ * Binance format: '1m', '5m', '15m', '1h', '4h', '1d', '1w'
+ */
+function toBinanceInterval(interval: string): string {
+  const map: Record<string, string> = {
+    '1m': '1m',
+    '5m': '5m',
+    '15m': '15m',
+    '1H': '1h',
+    '4H': '4h',
+    '1D': '1d',
+    '1W': '1w',
+  };
+  return map[interval] || '1d';
+}
+
+/**
  * Sleep helper for rate limiting.
  */
 function sleep(ms: number): Promise<void> {
@@ -172,12 +190,13 @@ export class BinanceProvider implements MarketDataProvider {
     throw new Error('All Binance API endpoints unavailable');
   }
 
-  async getCandles(symbol: string, days: number = 180): Promise<Candle[]> {
+  async getCandles(symbol: string, days: number = 180, interval: string = '1d'): Promise<Candle[]> {
     const pair = toBinancePair(symbol);
+    const binanceInterval = toBinanceInterval(interval);
     const limit = Math.min(days, 1000); // Binance max 1000 per request
 
     const data = await this.fetchFromBinance<BinanceKline[]>(
-      `/api/v3/klines?symbol=${pair}&interval=1d&limit=${limit}`
+      `/api/v3/klines?symbol=${pair}&interval=${binanceInterval}&limit=${limit}`
     );
 
     const candles: Candle[] = data.map((k) => ({
