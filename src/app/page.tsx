@@ -34,6 +34,7 @@ import {
   PanelRight,
   ChevronLeft,
   List,
+  AlertTriangle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { LoadingScreen } from '@/components/loading-screen';
@@ -114,12 +115,26 @@ export default function TradeIQDashboard() {
   const activeMacro = analysisForSymbol === selectedSymbol ? macroAnalysis : null;
   const activeConfluence = analysisForSymbol === selectedSymbol ? confluence : null;
 
-  // Fetch market status (provider info)
+  // Fetch market status (provider info + data quality)
   const { data: marketStatus } = useQuery({
     queryKey: ['marketStatus'],
     queryFn: async () => {
       const res = await fetch('/api/market/status');
-      return res.json() as Promise<{ provider: string; isRealData: boolean; isFallback: boolean; activeProviders: string[]; timestamp: number }>;
+      return res.json() as Promise<{
+        provider: string;
+        isRealData: boolean;
+        isFallback: boolean;
+        activeProviders: string[];
+        dataQuality?: {
+          source: 'real' | 'mock' | 'stale' | 'partial';
+          isMockData: boolean;
+          isStale: boolean;
+          staleSymbols: string[];
+          lastRealDataTime: number | null;
+          warnings: string[];
+        };
+        timestamp: number;
+      }>;
     },
     refetchInterval: 60000,
     staleTime: 30000,
@@ -469,6 +484,29 @@ export default function TradeIQDashboard() {
     <div className="h-screen flex flex-col trading-bg text-white overflow-hidden">
       {/* Animated Loading Screen */}
       <LoadingScreen progress={loadProgress} step={loadStep} />
+
+      {/* Data Quality Warning Banner */}
+      {marketStatus?.dataQuality?.isMockData && (
+        <div className="bg-red-500/10 border-b border-red-500/30 px-3 py-1.5 flex items-center justify-center gap-2 flex-shrink-0">
+          <AlertTriangle className="w-3.5 h-3.5 text-red-400 flex-shrink-0" />
+          <span className="text-[10px] sm:text-xs text-red-300 font-medium">
+            DATOS SIMULADOS — No operar con dinero real basado en estos datos
+          </span>
+          {marketStatus.dataQuality.warnings.length > 0 && (
+            <span className="text-[9px] text-red-400/70 hidden sm:inline">
+              ({marketStatus.dataQuality.warnings[0]})
+            </span>
+          )}
+        </div>
+      )}
+      {!marketStatus?.dataQuality?.isMockData && marketStatus?.dataQuality?.isStale && (
+        <div className="bg-yellow-500/10 border-b border-yellow-500/30 px-3 py-1.5 flex items-center justify-center gap-2 flex-shrink-0">
+          <AlertTriangle className="w-3.5 h-3.5 text-yellow-400 flex-shrink-0" />
+          <span className="text-[10px] sm:text-xs text-yellow-300 font-medium">
+            DATOS ANTIGUOS — Algunos símbolos tienen datos retrasados
+          </span>
+        </div>
+      )}
 
       {/* ===== HEADER — Desktop ===== */}
       <header className="h-12 border-b border-white/5 flex items-center justify-between px-4 flex-shrink-0">

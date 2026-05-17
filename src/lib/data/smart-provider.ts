@@ -1,10 +1,11 @@
-import type { Candle, Quote } from '../types';
+import type { Candle, Quote, DataQualityReport } from '../types';
 import type { MarketDataProvider, SymbolInfo } from './market-data-interface';
 import { MockProvider } from './mock-provider';
 import { PolygonProvider } from './polygon-provider';
 import { BinanceProvider, isCryptoSymbol } from './binance-provider';
 import { CoinGeckoProvider } from './coingecko-provider';
 import { DataCache } from './market-data-interface';
+import { validateCandleArray, cleanCandleData, validateQuote, isPriceSane, isCandleDataStale } from './validator';
 
 /**
  * Smart Provider — routes requests to the best available data source.
@@ -54,6 +55,11 @@ export class SmartProvider implements MarketDataProvider {
   private cryptoQuoteCache = new Map<string, { data: Quote; timestamp: number }>();
   private cryptoQuoteCacheTtl = 30_000; // 30s
 
+  // Data quality tracking
+  private lastRealDataTime: number | null = null;
+  private mockSymbols = new Set<string>();
+  private staleSymbols = new Set<string>();
+
   constructor(polygonApiKey?: string) {
     this.coingecko = new CoinGeckoProvider();
     this.binance = new BinanceProvider();
@@ -69,14 +75,14 @@ export class SmartProvider implements MarketDataProvider {
   async getCandles(symbol: string, days: number = 180, interval: string = '1D'): Promise<Candle[]> {
     if (isCryptoSymbol(symbol)) {
       // For daily/weekly crypto: MERGE CoinGecko (deep history) + Binance (real-time today)
-      // This solves the CoinGecko 1-2 day lag problem — CoinGecko gives us 180 days of
-      // history but may miss today, while Binance has real-time data including today.
       if (['1D', '1W'].includes(interval)) {
-        return this.getCandlesMerged(symbol, days, interval);
+        const candles = await this.getCandlesMerged(symbol, days, interval);
+        return this.validateAndCleanCandles(candles, symbol, interval);
       }
       // For intraday crypto, try Binance first (CoinGecko free doesn't support intraday)
       const providers = [this.binance, this.coingecko, this.mock];
-      return this.getCandlesWithFallback(symbol, days, interval, providers);
+      const candles = await this.getCandlesWithFallback(symbol, days, interval, providers);
+      return this.validateAndCleanCandles(candles, symbol, interval);
     }
 
     // Stocks: Polygon or Mock
@@ -87,16 +93,23 @@ export class SmartProvider implements MarketDataProvider {
         PROVIDER_TIMEOUT,
         `${provider.name}.getCandles(${symbol})`
       );
-      return result ?? this.mock.getCandles(symbol, days, interval);
+      const candles = result ?? await this.mock.getCandles(symbol, days, interval);
+      // Track if using mock data
+      if (!result) this.mockSymbols.add(symbol);
+      else this.mockSymbols.delete(symbol);
+      return this.validateAndCleanCandles(candles, symbol, interval);
     } catch {
       console.warn(`[TradeIQ] ${provider.name} failed for getCandles(${symbol}), using mock`);
-      return this.mock.getCandles(symbol, days, interval);
+      this.mockSymbols.add(symbol);
+      const candles = await this.mock.getCandles(symbol, days, interval);
+      return this.validateAndCleanCandles(candles, symbol, interval);
     }
   }
 
   async getQuote(symbol: string): Promise<Quote> {
     if (isCryptoSymbol(symbol)) {
-      return this.getCryptoQuote(symbol);
+      const quote = await this.getCryptoQuote(symbol);
+      return this.validateAndMarkQuote(quote);
     }
 
     // Stocks: Polygon or Mock
@@ -107,10 +120,15 @@ export class SmartProvider implements MarketDataProvider {
         PROVIDER_TIMEOUT,
         `${provider.name}.getQuote(${symbol})`
       );
-      return result ?? this.mock.getQuote(symbol);
+      const quote = result ?? await this.mock.getQuote(symbol);
+      if (!result) this.mockSymbols.add(symbol);
+      else this.mockSymbols.delete(symbol);
+      return this.validateAndMarkQuote(quote, !result);
     } catch {
       console.warn(`[TradeIQ] ${provider.name} failed for getQuote(${symbol}), using mock`);
-      return this.mock.getQuote(symbol);
+      this.mockSymbols.add(symbol);
+      const quote = await this.mock.getQuote(symbol);
+      return this.validateAndMarkQuote(quote, true);
     }
   }
 
@@ -232,6 +250,42 @@ export class SmartProvider implements MarketDataProvider {
     if (this.hasPolygonKey) providers.push('polygon');
     providers.push('mock'); // Always available as fallback
     return providers;
+  }
+
+  /**
+   * Get a data quality report — essential for trading safety.
+   * Tells the UI whether data is real, mock, or stale.
+   */
+  getDataQualityReport(): DataQualityReport {
+    const warnings: string[] = [];
+
+    if (!this.hasPolygonKey) {
+      warnings.push('Stock data is simulated (no POLYGON_API_KEY). Do NOT trade stocks based on this data.');
+    }
+    if (this.mockSymbols.size > 0) {
+      warnings.push(`${this.mockSymbols.size} symbol(s) using mock data: ${[...this.mockSymbols].slice(0, 5).join(', ')}`);
+    }
+    if (this.staleSymbols.size > 0) {
+      warnings.push(`${this.staleSymbols.size} symbol(s) with stale data: ${[...this.staleSymbols].slice(0, 5).join(', ')}`);
+    }
+
+    let source: DataQualityReport['source'] = 'real';
+    if (this.mockSymbols.size > 0 && this.lastRealDataTime !== null) {
+      source = 'partial';
+    } else if (this.mockSymbols.size > 0) {
+      source = 'mock';
+    } else if (this.staleSymbols.size > 0) {
+      source = 'stale';
+    }
+
+    return {
+      source,
+      isMockData: this.mockSymbols.size > 0,
+      isStale: this.staleSymbols.size > 0,
+      staleSymbols: [...this.staleSymbols],
+      lastRealDataTime: this.lastRealDataTime,
+      warnings,
+    };
   }
 
   /**
@@ -522,5 +576,58 @@ export class SmartProvider implements MarketDataProvider {
 
   private getStockProvider(): MarketDataProvider {
     return this.polygon || this.mock;
+  }
+
+  /**
+   * Validate candles and clean bad data before returning to the caller.
+   * Also tracks data freshness and mock usage.
+   */
+  private validateAndCleanCandles(candles: Candle[], symbol: string, interval: string): Candle[] {
+    if (candles.length === 0) return candles;
+
+    // Run validation
+    const validation = validateCandleArray(candles, symbol);
+    if (validation.warnings.length > 0) {
+      console.warn(`[TradeIQ] Candle validation warnings for ${symbol}:`, validation.warnings.slice(0, 3));
+    }
+    if (!validation.isValid) {
+      console.warn(`[TradeIQ] Candle validation errors for ${symbol}:`, validation.errors.slice(0, 3));
+      // Clean the data — remove invalid candles
+      const cleaned = cleanCandleData(candles, symbol);
+      if (cleaned.length < candles.length) {
+        console.warn(`[TradeIQ] Cleaned ${candles.length - cleaned.length} bad candles for ${symbol}`);
+      }
+      candles = cleaned;
+    }
+
+    // Track staleness
+    if (isCandleDataStale(candles, interval)) {
+      this.staleSymbols.add(symbol);
+    } else {
+      this.staleSymbols.delete(symbol);
+      this.lastRealDataTime = Date.now();
+    }
+
+    return candles;
+  }
+
+  /**
+   * Validate a quote and mark it with isMock if needed.
+   */
+  private validateAndMarkQuote(quote: Quote, isMock: boolean = false): Quote {
+    const validation = validateQuote(quote);
+    if (validation.warnings.length > 0) {
+      console.warn(`[TradeIQ] Quote validation warnings for ${quote.symbol}:`, validation.warnings.slice(0, 2));
+    }
+    if (!validation.isValid) {
+      console.warn(`[TradeIQ] Quote validation errors for ${quote.symbol}:`, validation.errors.slice(0, 2));
+    }
+
+    // Price sanity check
+    if (!isPriceSane(quote.symbol, quote.price)) {
+      console.warn(`[TradeIQ] Price sanity check failed for ${quote.symbol}: $${quote.price}`);
+    }
+
+    return { ...quote, isMock };
   }
 }

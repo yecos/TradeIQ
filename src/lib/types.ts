@@ -20,6 +20,8 @@ export interface Quote {
   open: number;
   prevClose: number;
   marketCap?: number;
+  /** True if this quote comes from mock/simulated data */
+  isMock?: boolean;
 }
 
 export interface SymbolInfo {
@@ -28,6 +30,50 @@ export interface SymbolInfo {
   type: string; // 'stock', 'etf', 'crypto', etc.
   exchange: string;
   currency: string;
+}
+
+// Data Quality Types
+export interface DataQualityReport {
+  source: 'real' | 'mock' | 'stale' | 'partial';
+  isMockData: boolean;
+  isStale: boolean;
+  staleSymbols: string[];
+  lastRealDataTime: number | null;
+  warnings: string[];
+}
+
+// Risk Management Types
+export interface RiskConfig {
+  maxRiskPerTradePercent: number;
+  maxDailyLossPercent: number;
+  maxDrawdownPercent: number;
+  maxOpenPositions: number;
+  minAccountEquity: number;
+  tradingHours: { start: number; end: number } | null;
+  tradingEnabled: boolean;
+}
+
+export interface RiskAssessment {
+  allowed: boolean;
+  reason: string | null;
+  positionSize: number;
+  positionValue: number;
+  riskAmount: number;
+  riskPercent: number;
+  dailyPnl: number;
+  currentDrawdown: number;
+  openPositions: number;
+  warnings: string[];
+}
+
+export interface AccountSnapshot {
+  equity: number;
+  equityPeak: number;
+  dailyPnl: number;
+  dailyPnlStart: number;
+  openPositions: number;
+  unrealizedPnl: number;
+  lastTradeTime: number | null;
 }
 
 // Vector Types

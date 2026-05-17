@@ -6,7 +6,39 @@ El formato se basa en [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 
 ---
 
-## [0.7.0] - 2026-05-17
+## [0.9.0] - 2026-05-18
+
+### Agregado
+- **FEATURE**: Módulo de validación de datos de mercado (`src/lib/data/validator.ts`)
+  - Validación de candles: NaN/Infinity, precios zero/negativos, consistencia OHLC, timestamps futuros, detección de gaps
+  - Validación de quotes: precio, volumen, consistencia de change, límites high/low
+  - Sanity check de precios por símbolo (rangos conocidos para BTC, ETH, AAPL, etc.)
+  - Detección de datos antiguos (stale) por intervalo
+  - Limpieza automática de datos inválidos (remueve candles malos, reordena)
+- **FEATURE**: Data Quality Report — el SmartProvider rastrea qué símbolos usan mock data y cuáles están stale
+  - `getDataQualityReport()` retorna: source, isMockData, isStale, staleSymbols, lastRealDataTime, warnings
+  - API `/api/market/status` ahora incluye `dataQuality` con el reporte completo
+- **FEATURE**: Banner de advertencia en UI cuando datos son simulados o antiguos
+  - Banner rojo: "DATOS SIMULADOS — No operar con dinero real basado en estos datos"
+  - Banner amarillo: "DATOS ANTIGUOS — Algunos símbolos tienen datos retrasados"
+- **FEATURE**: Campo `isMock` en tipo `Quote` para identificar datos simulados
+- **FEATURE**: Tipos `DataQualityReport`, `RiskConfig`, `RiskAssessment`, `AccountSnapshot` en `types.ts`
+- **FEATURE**: Risk Management Engine (`src/lib/risk/risk-engine.ts`)
+  - 7 reglas de protección: master switch, dirección, equity mínimo, max drawdown, pérdida diaria, posiciones máximas, horario
+  - Position sizing automático: método fixed-fractional (riesgo X% / distancia stop = shares)
+  - Configuración ajustable en runtime
+  - Warnings cuando se acerca a límites (80% drawdown, 70% pérdida diaria)
+  - Verificación de R:R mínimo recomendado (1.5)
+- **FEATURE**: 46 nuevos tests (27 validación + 19 risk engine, 124 total)
+
+### Cambios
+- **CHANGE**: SmartProvider ahora valida todos los candles y quotes antes de retornarlos
+- **CHANGE**: SmartProvider rastrea `mockSymbols` y `staleSymbols` automáticamente
+- **CHANGE**: API `/api/market/status` expone `dataQuality` reporte completo
+
+---
+
+## [0.8.0] - 2026-05-18
 
 ### Agregado
 - **FEATURE**: Motor de Backtesting completo para validar estrategias con datos históricos
