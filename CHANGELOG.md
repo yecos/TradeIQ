@@ -6,6 +6,44 @@ El formato se basa en [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 
 ---
 
+## [0.17.0] - 2026-05-18
+
+### Agregado
+- **FEATURE**: Sistema de Alertas y Notificaciones (`src/lib/alerts/alert-engine.ts`)
+  - AlertEngine: evaluación de condiciones contra datos de mercado en tiempo real
+  - Operadores: >=, <=, ==, !=, crosses_above, crosses_below
+  - Campos: price, change_percent, volume, confluence_score
+  - Factory methods: createPriceTargetAlert, createConfluenceAlert, createRiskEventAlert, createTradeAlert
+  - Batch evaluation: evaluateAlerts() para evaluar múltiples alertas contra snapshot
+  - Singleton alertEngine exportado para uso global
+- **FEATURE**: Modelo Alert en Prisma (type, severity, condition JSON, isRead, isTriggered)
+- **FEATURE**: API endpoints de alertas (`/api/alerts`)
+  - GET con filtros (symbol, type, isRead, severity)
+  - POST con validación para crear alertas
+  - PATCH para marcar como leída/activada
+  - DELETE para eliminar alertas
+- **FEATURE**: Hook `useAlerts` (`src/hooks/use-alerts.ts`)
+  - TanStack Query: fetch de /api/alerts cada 30s
+  - Expose: alerts, unreadCount, createAlert(), markAsRead(), deleteAlert(), markAllAsRead()
+- **FEATURE**: AlertPanel (`src/components/trading/alert-panel.tsx`)
+  - Header con badge de alertas no leídas + mark-all-read + crear toggle
+  - Formulario colapsable: símbolo (con quick-select de watchlist), tipo, condición/operador, severidad
+  - Lista de alertas: iconos por severidad (Bell/AlertTriangle/Siren), indicador pulsante para activas
+  - Click para marcar como leída, hover para eliminar
+  - Alertas leídas con opacity reducida
+  - Empty state: "Sin alertas configuradas"
+- **FEATURE**: Tab "Alertas" en dashboard (icono Bell)
+- **FEATURE**: 35 nuevos tests de alerts (296 total)
+  - Condition evaluation: >=, <=, ==, !=, missing data, change_percent, volume, confluence_score
+  - Crosses_above/crosses_below: transitions, non-transitions, no previous value
+  - Alert factories: price target, confluence, risk event, trade execution
+  - Batch evaluation: triggered IDs, skip already triggered, empty array
+  - Default state: unread/untriggered, triggered for risk/trade
+  - Condition serialization/deserialization
+  - Severity classification: info for price/trade, warning for confluence, custom for risk
+
+---
+
 ## [0.16.0] - 2026-05-18
 
 ### Agregado

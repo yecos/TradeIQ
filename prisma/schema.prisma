@@ -64,6 +64,22 @@ model VerificationToken {
 
 // ─── TradeIQ Models ───────────────────────────────────────────────────────────
 
+model Alert {
+  id          String   @id @default(cuid())
+  userId      String?  // Link to user
+  type        String   // "price_target", "confluence", "risk_event", "trade_executed", "position_closed"
+  symbol      String   // e.g. "BTC", "AAPL"
+  title       String   // Short description
+  message     String   // Detailed message
+  severity    String   @default("info") // "info", "warning", "critical"
+  isRead      Boolean  @default(false)
+  isTriggered Boolean  @default(false)
+  condition   String   @default("{}") // JSON: { field: "price", operator: ">=", value: 100000 }
+  triggeredAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
 model BrokerConfig {
   id           String   @id @default(cuid())
   userId       String?  // Link to user (null = legacy/global config)

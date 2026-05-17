@@ -12,6 +12,7 @@ import { JournalPanel } from '@/components/trading/journal-panel';
 import { BrokerPanel } from '@/components/trading/broker-panel';
 import { BacktestPanel } from '@/components/trading/backtest-panel';
 import { PortfolioPanel } from '@/components/trading/portfolio-panel';
+import { AlertPanel } from '@/components/trading/alert-panel';
 import type { Candle, Quote, TechnicalAnalysis, PatternAnalysis, VolumeAnalysis, NewsAnalysis, SentimentAnalysis, MacroAnalysis, ConfluenceResult } from '@/lib/types';
 import type { WSConnectionState } from '@/lib/data/binance-ws';
 import { Button } from '@/components/ui/button';
@@ -36,6 +37,7 @@ import {
   PanelRight,
   List,
   AlertTriangle,
+  Bell,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { LoadingScreen } from '@/components/loading-screen';
@@ -405,6 +407,13 @@ export default function TradeIQDashboard() {
           <Wallet className="w-3 h-3 mr-1" />
           Portafolio
         </TabsTrigger>
+        <TabsTrigger
+          value="alerts"
+          className="h-9 text-[10px] data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-emerald-400 data-[state=active]:text-emerald-400 data-[state=active]:shadow-none rounded-none px-3 flex-shrink-0"
+        >
+          <Bell className="w-3 h-3 mr-1" />
+          Alertas
+        </TabsTrigger>
       </TabsList>
 
       <div className="flex-1 overflow-hidden">
@@ -453,6 +462,10 @@ export default function TradeIQDashboard() {
 
         <TabsContent value="portfolio" className="h-full m-0 p-3 overflow-y-auto custom-scrollbar">
           <PortfolioPanel brokerConnected={brokerConfig?.isActive ?? false} />
+        </TabsContent>
+
+        <TabsContent value="alerts" className="h-full m-0 p-3 overflow-y-auto custom-scrollbar">
+          <AlertPanel watchlist={watchlist} brokerConnected={brokerConfig?.isActive ?? false} />
         </TabsContent>
       </div>
     </Tabs>

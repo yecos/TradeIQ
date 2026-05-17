@@ -33,8 +33,8 @@ interface AppState {
   setWatchlist: (symbols: string[]) => void;
 
   // Active panel
-  activePanel: 'analysis' | 'signals' | 'journal' | 'broker';
-  setActivePanel: (panel: 'analysis' | 'signals' | 'journal' | 'broker') => void;
+  activePanel: 'analysis' | 'signals' | 'journal' | 'broker' | 'alerts';
+  setActivePanel: (panel: 'analysis' | 'signals' | 'journal' | 'broker' | 'alerts') => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
