@@ -1,7 +1,4 @@
-import { DataCache } from './market-data-interface';
-import { MockProvider } from './mock-provider';
 import { SmartProvider } from './smart-provider';
-import { BinanceProvider } from './binance-provider';
 
 /**
  * Provider Factory — creates the appropriate market data provider.
