@@ -60,9 +60,10 @@ export class CoinGeckoProvider implements MarketDataProvider {
   private quoteCache = new Map<string, { data: Quote; timestamp: number }>();
   private quoteCacheTtl = 60_000; // 60 seconds (increased from 30s)
 
-  // Cache for candles (5min TTL)
+  // Cache for candles (60s TTL — reduced from 5min to avoid serving stale data
+  // when CoinGecko lags 1-2 days behind real-time)
   private candleCache = new Map<string, { data: Candle[]; timestamp: number }>();
-  private candleCacheTtl = 300_000; // 5 minutes
+  private candleCacheTtl = 60_000; // 60 seconds
 
   // Batch quote cache — CoinGecko supports batch queries
   private batchCache: { data: Map<string, Quote>; timestamp: number } | null = null;

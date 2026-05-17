@@ -68,11 +68,14 @@ export class SmartProvider implements MarketDataProvider {
 
   async getCandles(symbol: string, days: number = 180, interval: string = '1D'): Promise<Candle[]> {
     if (isCryptoSymbol(symbol)) {
+      // For daily/weekly crypto: MERGE CoinGecko (deep history) + Binance (real-time today)
+      // This solves the CoinGecko 1-2 day lag problem — CoinGecko gives us 180 days of
+      // history but may miss today, while Binance has real-time data including today.
+      if (['1D', '1W'].includes(interval)) {
+        return this.getCandlesMerged(symbol, days, interval);
+      }
       // For intraday crypto, try Binance first (CoinGecko free doesn't support intraday)
-      // For daily/weekly, try CoinGecko first (more reliable from US servers)
-      const providers = ['1D', '1W'].includes(interval)
-        ? [this.coingecko, this.binance, this.mock]
-        : [this.binance, this.coingecko, this.mock];
+      const providers = [this.binance, this.coingecko, this.mock];
       return this.getCandlesWithFallback(symbol, days, interval, providers);
     }
 
@@ -357,6 +360,130 @@ export class SmartProvider implements MarketDataProvider {
     return this.mock.getQuote(symbol);
   }
 
+  /**
+   * Merge CoinGecko (deep history) + Binance (real-time) candle data.
+   *
+   * CoinGecko provides excellent historical data going back months/years,
+   * but its free API can lag 1-2 days behind real-time. Binance has
+   * real-time data including today's candle, but limited to ~1000 candles.
+   *
+   * This method fetches from BOTH in parallel, then:
+   * 1. Uses CoinGecko data for the deep historical portion
+   * 2. Overlays Binance data for the most recent period (where it overlaps)
+   * 3. The result has full depth + today's real-time data
+   */
+  private async getCandlesMerged(symbol: string, days: number, interval: string): Promise<Candle[]> {
+    const startTime = Date.now();
+
+    // Fetch from both providers in parallel
+    const [cgResult, binResult] = await Promise.allSettled([
+      withTimeout(
+        this.coingecko.getCandles(symbol, days, interval),
+        PROVIDER_TIMEOUT,
+        `CoinGecko.getCandles(${symbol}, ${interval})`
+      ),
+      withTimeout(
+        this.binance.getCandles(symbol, days, interval),
+        PROVIDER_TIMEOUT,
+        `Binance.getCandles(${symbol}, ${interval})`
+      ),
+    ]);
+
+    const cgCandles = cgResult.status === 'fulfilled' && cgResult.value ? cgResult.value : null;
+    const binCandles = binResult.status === 'fulfilled' && binResult.value ? binResult.value : null;
+
+    // If both failed, fall back to mock
+    if (!cgCandles && !binCandles) {
+      console.warn(`[TradeIQ] Both CoinGecko and Binance failed for ${symbol} candles, using mock`);
+      return this.mock.getCandles(symbol, days, interval);
+    }
+
+    // If only one succeeded, use it (with freshness check)
+    if (!cgCandles && binCandles) {
+      console.log(`[TradeIQ] CoinGecko failed for ${symbol}, using Binance only (${binCandles.length} candles)`);
+      return binCandles.slice(-days);
+    }
+    if (cgCandles && !binCandles) {
+      const fresh = this.isDataFresh(cgCandles, interval);
+      if (fresh) {
+        console.log(`[TradeIQ] Binance failed for ${symbol}, using CoinGecko only (${cgCandles.length} candles, data fresh)`);
+        return cgCandles;
+      }
+      // CoinGecko data is stale and Binance failed — try to append a synthetic "today" candle
+      // from the latest quote, or just return what we have
+      console.warn(`[TradeIQ] CoinGecko data for ${symbol} is stale (last candle: ${new Date(cgCandles[cgCandles.length - 1].time * 1000).toISOString()}), but Binance unavailable`);
+      return cgCandles;
+    }
+
+    // Both succeeded — MERGE! (at this point both are guaranteed non-null)
+    const merged = this.mergeCandleData(cgCandles!, binCandles!);
+    const elapsed = Date.now() - startTime;
+    console.log(
+      `[TradeIQ] Merged candles for ${symbol}: CG=${cgCandles!.length}, BIN=${binCandles!.length} → ${merged.length} candles (${elapsed}ms)`
+    );
+    return merged.slice(-days);
+  }
+
+  /**
+   * Merge candle data from CoinGecko (history) and Binance (real-time).
+   *
+   * Strategy:
+   * - For timestamps that exist in both → use Binance (more accurate, real-time)
+   * - For timestamps only in CoinGecko → keep CoinGecko data
+   * - For timestamps only in Binance → keep Binance data
+   * - Sort by time ascending
+   */
+  private mergeCandleData(cgCandles: Candle[], binCandles: Candle[]): Candle[] {
+    if (cgCandles.length === 0) return binCandles;
+    if (binCandles.length === 0) return cgCandles;
+
+    // Build a map of Binance candles by time for O(1) lookup
+    const binMap = new Map<number, Candle>();
+    for (const c of binCandles) {
+      binMap.set(c.time, c);
+    }
+
+    const merged: Candle[] = [];
+    const seenTimes = new Set<number>();
+
+    // Start with all CoinGecko candles
+    for (const cg of cgCandles) {
+      // If Binance has data for this time, prefer Binance (real-time)
+      const binCandle = binMap.get(cg.time);
+      if (binCandle) {
+        merged.push(binCandle);
+        seenTimes.add(cg.time);
+      } else {
+        merged.push(cg);
+        seenTimes.add(cg.time);
+      }
+    }
+
+    // Add any Binance candles that weren't in CoinGecko (e.g., today's candle)
+    for (const c of binCandles) {
+      if (!seenTimes.has(c.time)) {
+        merged.push(c);
+      }
+    }
+
+    // Sort by time
+    merged.sort((a, b) => a.time - b.time);
+    return merged;
+  }
+
+  /**
+   * Check if candle data is fresh enough (last candle within acceptable age).
+   * - For daily/weekly intervals: data should be within 48 hours
+   * - For intraday intervals: data should be within 2 hours
+   */
+  private isDataFresh(candles: Candle[], interval: string): boolean {
+    if (candles.length === 0) return false;
+    const lastCandle = candles[candles.length - 1];
+    const ageSeconds = Math.floor(Date.now() / 1000) - lastCandle.time;
+    const maxAge = ['1D', '1W'].includes(interval) ? 48 * 3600 : 2 * 3600;
+    return ageSeconds < maxAge;
+  }
+
   private async getCandlesWithFallback(
     symbol: string,
     days: number,
@@ -370,7 +497,16 @@ export class SmartProvider implements MarketDataProvider {
           PROVIDER_TIMEOUT,
           `${provider.name}.getCandles(${symbol}, ${interval})`
         );
-        if (result && result.length > 0) return result;
+        if (result && result.length > 0) {
+          // Freshness check: if data is stale, try next provider
+          if (!this.isDataFresh(result, interval)) {
+            console.warn(
+              `[TradeIQ] ${provider.name} returned stale data for ${symbol} (last candle: ${new Date(result[result.length - 1].time * 1000).toISOString()}), trying next provider...`
+            );
+            continue; // Try next provider
+          }
+          return result;
+        }
       } catch (error) {
         console.warn(
           `[TradeIQ] ${provider.name} failed for getCandles(${symbol}, ${interval}):`,
