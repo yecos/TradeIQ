@@ -11,7 +11,7 @@ import { AnalysisPanel } from '@/components/trading/analysis-panel';
 import { JournalPanel } from '@/components/trading/journal-panel';
 import { BrokerPanel } from '@/components/trading/broker-panel';
 import { BacktestPanel } from '@/components/trading/backtest-panel';
-import type { Candle, Quote, TechnicalAnalysis, PatternAnalysis, VolumeAnalysis, ConfluenceResult } from '@/lib/types';
+import type { Candle, Quote, TechnicalAnalysis, PatternAnalysis, VolumeAnalysis, NewsAnalysis, SentimentAnalysis, MacroAnalysis, ConfluenceResult } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -82,6 +82,9 @@ export default function TradeIQDashboard() {
   const [technical, setTechnical] = useState<TechnicalAnalysis | null>(null);
   const [patterns, setPatterns] = useState<PatternAnalysis | null>(null);
   const [volumeAnalysis, setVolumeAnalysis] = useState<VolumeAnalysis | null>(null);
+  const [newsAnalysis, setNewsAnalysis] = useState<NewsAnalysis | null>(null);
+  const [sentimentAnalysis, setSentimentAnalysis] = useState<SentimentAnalysis | null>(null);
+  const [macroAnalysis, setMacroAnalysis] = useState<MacroAnalysis | null>(null);
   const [confluence, setConfluence] = useState<ConfluenceResult | null>(null);
   const [analysisForSymbol, setAnalysisForSymbol] = useState<string>('');
   const [journalEntries, setJournalEntries] = useState<JournalEntry[]>([]);
@@ -98,6 +101,9 @@ export default function TradeIQDashboard() {
   const activeTechnical = analysisForSymbol === selectedSymbol ? technical : null;
   const activePatterns = analysisForSymbol === selectedSymbol ? patterns : null;
   const activeVolume = analysisForSymbol === selectedSymbol ? volumeAnalysis : null;
+  const activeNews = analysisForSymbol === selectedSymbol ? newsAnalysis : null;
+  const activeSentiment = analysisForSymbol === selectedSymbol ? sentimentAnalysis : null;
+  const activeMacro = analysisForSymbol === selectedSymbol ? macroAnalysis : null;
   const activeConfluence = analysisForSymbol === selectedSymbol ? confluence : null;
 
   // Fetch market status (provider info)
@@ -230,6 +236,9 @@ export default function TradeIQDashboard() {
       if (data.technical) setTechnical(data.technical);
       if (data.patterns) setPatterns(data.patterns);
       if (data.volume) setVolumeAnalysis(data.volume);
+      if (data.news) setNewsAnalysis(data.news);
+      if (data.sentiment) setSentimentAnalysis(data.sentiment);
+      if (data.macro) setMacroAnalysis(data.macro);
       if (data.confluence) {
         setConfluence(data.confluence);
         setLastConfluence(data.confluence);
@@ -687,6 +696,9 @@ export default function TradeIQDashboard() {
                   patterns={activePatterns}
                   volume={activeVolume}
                   confluence={activeConfluence}
+                  news={activeNews}
+                  sentiment={activeSentiment}
+                  macro={activeMacro}
                 />
               </TabsContent>
 

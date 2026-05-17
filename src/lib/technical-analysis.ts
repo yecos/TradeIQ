@@ -113,8 +113,8 @@ function calculateATR(candles: Candle[], period: number = 14): number {
   return lastN.reduce((a, b) => a + b, 0) / lastN.length;
 }
 
-function calculateADX(candles: Candle[], period: number = 14): number {
-  // Simplified ADX calculation
+function calculateADX(candles: Candle[], period: number = 14): { value: number; direction: 'LONG' | 'SHORT' | 'NEUTRAL' } {
+  // ADX with +DI/-DI for proper trend direction
   let plusDM = 0, minusDM = 0, tr = 0;
   const len = Math.min(period, candles.length - 1);
   for (let i = candles.length - len; i < candles.length; i++) {
@@ -128,11 +128,14 @@ function calculateADX(candles: Candle[], period: number = 14): number {
       Math.abs(candles[i].low - candles[i - 1].close)
     );
   }
-  if (tr === 0) return 25;
+  if (tr === 0) return { value: 25, direction: 'NEUTRAL' };
   const plusDI = (plusDM / tr) * 100;
   const minusDI = (minusDM / tr) * 100;
   const dx = Math.abs(plusDI - minusDI) / (plusDI + minusDI) * 100;
-  return dx;
+  const direction: 'LONG' | 'SHORT' | 'NEUTRAL' =
+    plusDI > minusDI + 5 ? 'LONG' :
+    minusDI > plusDI + 5 ? 'SHORT' : 'NEUTRAL';
+  return { value: dx, direction };
 }
 
 export function analyzeTechnical(candles: Candle[]): TechnicalAnalysis {
@@ -150,11 +153,22 @@ export function analyzeTechnical(candles: Candle[]): TechnicalAnalysis {
   const sma200Values = calculateSMA(closes, 200);
 
   const atr = calculateATR(candles);
-  const adx = calculateADX(candles);
+  const adxResult = calculateADX(candles);
+  const adx = adxResult.value;
 
-  // Stochastic RSI (simplified)
-  const prevRSI = isNaN(rsiValues[last - 1]) ? 50 : rsiValues[last - 1];
-  const stochRSI = { k: Math.min(100, Math.max(0, rsi)), d: Math.min(100, Math.max(0, prevRSI)) };
+  // Stochastic RSI — proper implementation using RSI values over a lookback window
+  // %K = (Current RSI - Lowest RSI) / (Highest RSI - Lowest RSI) × 100
+  // %D = 3-period SMA of %K
+  const rsiLookback = 14;
+  const rsiSlice = rsiValues.slice(-rsiLookback);
+  const rsiHigh = Math.max(...rsiSlice.filter(v => !isNaN(v)));
+  const rsiLow = Math.min(...rsiSlice.filter(v => !isNaN(v)));
+  const rsiRange = rsiHigh - rsiLow;
+  const stochK = rsiRange > 0 ? Math.min(100, Math.max(0, ((rsi - rsiLow) / rsiRange) * 100)) : 50;
+  // Simple %D = previous %K (simplified for single-point calculation)
+  const prevRSIVal = isNaN(rsiValues[last - 1]) ? 50 : rsiValues[last - 1];
+  const prevStochK = rsiRange > 0 ? Math.min(100, Math.max(0, ((prevRSIVal - rsiLow) / rsiRange) * 100)) : 50;
+  const stochRSI = { k: stochK, d: prevStochK };
 
   // Generate signals from technical indicators
   const signals: VectorSignal[] = [];
@@ -295,15 +309,15 @@ export function analyzeTechnical(candles: Candle[]): TechnicalAnalysis {
     });
   }
 
-  // ADX Signal (trend strength)
+  // ADX Signal (trend strength) — uses +DI/-DI for direction, not RSI
   if (adx > 25) {
     signals.push({
       vectorId: 'adx',
       vectorName: 'ADX',
-      direction: signals[0]?.direction || 'NEUTRAL',
+      direction: adxResult.direction,
       strength: Math.min(100, adx * 2),
       confidence: 70,
-      detail: `ADX en ${adx.toFixed(1)}. Tendencia fuerte confirmada.`,
+      detail: `ADX en ${adx.toFixed(1)}. Tendencia ${adxResult.direction === 'LONG' ? 'alcista' : adxResult.direction === 'SHORT' ? 'bajista' : 'lateral'} fuerte confirmada.`,
     });
   }
 

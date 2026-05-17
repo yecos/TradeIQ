@@ -26,25 +26,40 @@ export function detectPatterns(candles: Candle[]): PatternAnalysis {
     });
   }
 
-  // Hammer
-  if (lowerWick > bodySize * 2 && upperWick < bodySize * 0.5 && c.close > c.open) {
+  // Hammer (both green and red hammers are valid)
+  if (lowerWick > bodySize * 2 && upperWick < bodySize * 0.5) {
     patterns.push({
       name: 'Martillo (Hammer)',
       type: 'bullish',
       reliability: 72,
       index: last,
-      description: 'Martillo alcista. Presión compradora rechazó la baja. Posible rebote.',
+      description: `Martillo alcista${c.close > c.open ? '' : ' (rojo)'}. Presión compradora rechazó la baja. Posible rebote.`,
     });
   }
 
-  // Inverted Hammer
+  // Inverted Hammer / Shooting Star
+  // Inverted Hammer (bullish): appears at bottom of downtrend, long upper wick, small body at bottom
+  // Shooting Star (bearish): appears at top of uptrend, long upper wick, small body at bottom
+  // We detect both based on the wick pattern; context (trend) determines direction
+  // Simplified: if upper wick is dominant and body is small, detect as Shooting Star (bearish reversal at top)
   if (upperWick > bodySize * 2 && lowerWick < bodySize * 0.5 && c.close < c.open) {
     patterns.push({
-      name: 'Martillo Invertido',
+      name: 'Estrella Fugaz',
       type: 'bearish',
-      reliability: 60,
+      reliability: 68,
       index: last,
-      description: 'Martillo invertido. Presión vendedora rechazó la subida. Posible corrección.',
+      description: 'Estrella fugaz. Rechazo de niveles altos. Posible reversión bajista.',
+    });
+  }
+
+  // Inverted Hammer (bullish reversal): same wick pattern but closing near the top (close > open)
+  if (upperWick > bodySize * 2 && lowerWick < bodySize * 0.5 && c.close > c.open) {
+    patterns.push({
+      name: 'Martillo Invertido',
+      type: 'bullish',
+      reliability: 62,
+      index: last,
+      description: 'Martillo invertido. Indecisión con presión compradora. Posible reversión alcista.',
     });
   }
 
