@@ -6,10 +6,13 @@ import type { MarketDataProvider, SymbolInfo } from './market-data-interface';
  * No API key required — all endpoints used are public.
  *
  * Rate limits: 1200 requests/min (very generous)
- * Base URL: https://api.binance.com
  *
- * Supported symbols: BTC, ETH, BNB, SOL, XRP, ADA, DOGE, DOT, AVAX, MATIC, etc.
- * All pairs are quoted in USDT.
+ * URL strategy:
+ * - Primary: https://api.binance.com (global)
+ * - Fallback: https://api.binance.us (US-compliant, works from Vercel/AWS)
+ *
+ * If the primary URL fails (geo-blocked from US servers),
+ * it automatically falls back to binance.us.
  */
 
 // Well-known crypto symbols with metadata
@@ -26,7 +29,7 @@ const CRYPTO_SEEDS: Record<string, { name: string; pair: string }> = {
   'MATIC': { name: 'Polygon', pair: 'MATICUSDT' },
   'LINK': { name: 'Chainlink', pair: 'LINKUSDT' },
   'UNI': { name: 'Uniswap', pair: 'UNIUSDT' },
-  'ATOM': { name: 'Cosmos', pair: 'ATUSDT' },
+  'ATOM': { name: 'Cosmos', pair: 'ATOMUSDT' },
   'LTC': { name: 'Litecoin', pair: 'LTCUSDT' },
   'NEAR': { name: 'NEAR Protocol', pair: 'NEARUSDT' },
   'AAVE': { name: 'Aave', pair: 'AAVEUSDT' },
@@ -35,6 +38,11 @@ const CRYPTO_SEEDS: Record<string, { name: string; pair: string }> = {
   'APT': { name: 'Aptos', pair: 'APTUSDT' },
   'SUI': { name: 'Sui', pair: 'SUIUSDT' },
 };
+
+const BINANCE_URLS = [
+  'https://api.binance.com',
+  'https://api.binance.us',
+];
 
 /**
  * Check if a symbol is likely a cryptocurrency.
@@ -56,23 +64,98 @@ function toBinancePair(symbol: string): string {
   return seed?.pair || `${upper}USDT`;
 }
 
+/**
+ * Format price with appropriate decimal precision.
+ * BTC → 2 decimals, ETH → 2, small caps → 4-6
+ */
+function formatPrice(price: number): number {
+  if (price >= 1000) return Math.round(price * 100) / 100;
+  if (price >= 1) return Math.round(price * 10000) / 10000;
+  if (price >= 0.01) return Math.round(price * 100000) / 100000;
+  return Math.round(price * 1000000) / 1000000;
+}
+
 export class BinanceProvider implements MarketDataProvider {
   readonly name = 'binance';
-  private baseUrl = 'https://api.binance.com';
+  private activeBaseUrl: string | null = null; // Cached working URL
   private exchangeInfoCache: Map<string, string> | null = null;
+
+  /**
+   * Get the working Binance base URL.
+   * Tries binance.com first, falls back to binance.us if blocked.
+   */
+  private async getBaseUrl(): Promise<string> {
+    // If we already found a working URL, use it
+    if (this.activeBaseUrl) return this.activeBaseUrl;
+
+    // Try each URL with a lightweight health check
+    for (const url of BINANCE_URLS) {
+      try {
+        const response = await fetch(`${url}/api/v3/ping`, {
+          signal: AbortSignal.timeout(5000), // 5s timeout
+        });
+        if (response.ok) {
+          this.activeBaseUrl = url;
+          console.warn(`[TradeIQ] Binance connected: ${url}`);
+          return url;
+        }
+      } catch {
+        console.warn(`[TradeIQ] Binance ${url} unavailable, trying next...`);
+      }
+    }
+
+    // If all fail, default to .com (will error upstream with useful message)
+    console.warn('[TradeIQ] All Binance URLs failed health check');
+    return BINANCE_URLS[0];
+  }
+
+  /**
+   * Fetch from Binance with automatic URL fallback.
+   */
+  private async fetchFromBinance<T>(path: string): Promise<T> {
+    const urls = this.activeBaseUrl ? [this.activeBaseUrl, ...BINANCE_URLS.filter(u => u !== this.activeBaseUrl)] : BINANCE_URLS;
+
+    for (const baseUrl of urls) {
+      try {
+        const response = await fetch(`${baseUrl}${path}`, {
+          signal: AbortSignal.timeout(10000), // 10s timeout
+        });
+
+        if (response.ok) {
+          this.activeBaseUrl = baseUrl; // Cache working URL
+          return response.json() as Promise<T>;
+        }
+
+        // 451 = geo-blocked, 403 = forbidden — try next URL
+        if (response.status === 451 || response.status === 403) {
+          console.warn(`[TradeIQ] Binance ${baseUrl} blocked (${response.status}), trying fallback...`);
+          continue;
+        }
+
+        throw new Error(`Binance API error: ${response.status} ${response.statusText}`);
+      } catch (error) {
+        if (error instanceof TypeError && error.message.includes('fetch')) {
+          console.warn(`[TradeIQ] Binance ${baseUrl} network error, trying fallback...`);
+          continue;
+        }
+        // Re-throw non-network errors (like 4xx other than 451/403)
+        if (error instanceof Error && !error.message.includes('fetch') && !error.message.includes('abort')) {
+          throw error;
+        }
+        continue;
+      }
+    }
+
+    throw new Error('All Binance API endpoints unavailable');
+  }
 
   async getCandles(symbol: string, days: number = 180): Promise<Candle[]> {
     const pair = toBinancePair(symbol);
     const limit = Math.min(days, 1000); // Binance max 1000 per request
 
-    const url = `${this.baseUrl}/api/v3/klines?symbol=${pair}&interval=1d&limit=${limit}`;
-
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`Binance API error: ${response.status} ${response.statusText}`);
-    }
-
-    const data = await response.json() as BinanceKline[];
+    const data = await this.fetchFromBinance<BinanceKline[]>(
+      `/api/v3/klines?symbol=${pair}&interval=1d&limit=${limit}`
+    );
 
     const candles: Candle[] = data.map((k) => ({
       time: Math.floor(k[0] / 1000), // Open time in ms → seconds
@@ -92,14 +175,9 @@ export class BinanceProvider implements MarketDataProvider {
     const name = CRYPTO_SEEDS[upper]?.name || upper;
 
     // 24hr ticker gives us everything we need
-    const url = `${this.baseUrl}/api/v3/ticker/24hr?symbol=${pair}`;
-
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`Binance API error: ${response.status} ${response.statusText}`);
-    }
-
-    const data = await response.json() as Binance24hrTicker;
+    const data = await this.fetchFromBinance<Binance24hrTicker>(
+      `/api/v3/ticker/24hr?symbol=${pair}`
+    );
 
     const price = parseFloat(data.lastPrice);
     const prevClose = parseFloat(data.prevClosePrice);
@@ -109,14 +187,14 @@ export class BinanceProvider implements MarketDataProvider {
     return {
       symbol: upper,
       name,
-      price: Math.round(price * 100) / 100,
-      change: Math.round(change * 100) / 100,
+      price: formatPrice(price),
+      change: formatPrice(change),
       changePercent: Math.round(changePercent * 100) / 100,
-      volume: Math.floor(parseFloat(data.volume) * price), // Quote volume in USD
-      high: Math.round(parseFloat(data.highPrice) * 100) / 100,
-      low: Math.round(parseFloat(data.lowPrice) * 100) / 100,
-      open: Math.round(parseFloat(data.openPrice) * 100) / 100,
-      prevClose: Math.round(prevClose * 100) / 100,
+      volume: Math.floor(parseFloat(data.quoteVolume) || parseFloat(data.volume) * price),
+      high: formatPrice(parseFloat(data.highPrice)),
+      low: formatPrice(parseFloat(data.lowPrice)),
+      open: formatPrice(parseFloat(data.openPrice)),
+      prevClose: formatPrice(prevClose),
     };
   }
 
@@ -181,15 +259,13 @@ export class BinanceProvider implements MarketDataProvider {
 
   /**
    * Fetch and cache Binance exchange info for symbol lookup.
-   * This is a large response so we cache it for 1 hour.
    */
   private async getExchangeInfo(): Promise<Map<string, string>> {
     if (this.exchangeInfoCache) return this.exchangeInfoCache;
 
-    const response = await fetch(`${this.baseUrl}/api/v3/exchangeInfo`);
-    if (!response.ok) return new Map();
-
-    const data = await response.json() as BinanceExchangeInfo;
+    const data = await this.fetchFromBinance<BinanceExchangeInfo>(
+      '/api/v3/exchangeInfo'
+    );
 
     const map = new Map<string, string>();
     for (const s of data.symbols) {
@@ -207,7 +283,6 @@ export class BinanceProvider implements MarketDataProvider {
 
 /**
  * Binance Kline (candlestick) response.
- * Each kline is an array with fixed positions:
  * [0] Open time, [1] Open, [2] High, [3] Low, [4] Close,
  * [5] Volume, [6] Close time, [7] Quote asset volume,
  * [8] Number of trades, [9] Taker buy base, [10] Taker buy quote
