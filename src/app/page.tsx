@@ -306,31 +306,15 @@ export default function TradeIQDashboard() {
   }, []);
 
   const saveBrokerConfig = useCallback(async (config: Partial<BrokerConfig>) => {
-    try {
-      await fetch('/api/broker', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config),
-      });
-      setBrokerConfig({ ...config, isActive: true } as BrokerConfig);
-      toast.success('Broker configurado');
-    } catch {
-      toast.error('Error al configurar broker');
-    }
+    // BrokerPanel now handles the API call internally
+    // This callback just updates the parent's local state
+    setBrokerConfig({ ...config, isActive: true } as BrokerConfig);
   }, []);
 
   const disconnectBroker = useCallback(async () => {
-    try {
-      await fetch('/api/broker', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ brokerName: 'alpaca', apiKey: '', apiSecret: '', isPaper: true }),
-      });
-      setBrokerConfig(null);
-      toast.success('Broker desconectado');
-    } catch {
-      toast.error('Error al desconectar');
-    }
+    // BrokerPanel handles the API call internally
+    // This callback just updates the parent's local state
+    setBrokerConfig(null);
   }, []);
 
   const handleRefreshQuotes = useCallback(() => {
@@ -428,7 +412,7 @@ export default function TradeIQDashboard() {
               </div>
             ) : (
               signals.map((signal, i) => (
-                <SignalCard key={i} signal={signal} onSave={saveSignal} />
+                <SignalCard key={i} signal={signal} onSave={saveSignal} brokerConnected={brokerConfig?.isActive} />
               ))
             )}
           </div>

@@ -1,18 +1,102 @@
 'use client';
 
+import { useState } from 'react';
 import type { ConfluenceResult } from '@/lib/types';
-import { ArrowUpCircle, ArrowDownCircle, MinusCircle, Save } from 'lucide-react';
+import { ArrowUpCircle, ArrowDownCircle, MinusCircle, Save, Zap, AlertTriangle, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { toast } from 'sonner';
+
+interface RiskAssessPreview {
+  allowed: boolean;
+  reason: string | null;
+  positionSize: number;
+  positionValue: number;
+  riskAmount: number;
+  riskPercent: number;
+  warnings: string[];
+}
 
 interface SignalCardProps {
   signal: ConfluenceResult;
   onSave?: (signal: ConfluenceResult) => void;
+  onExecute?: (signal: ConfluenceResult) => void;
+  brokerConnected?: boolean;
 }
 
-export function SignalCard({ signal, onSave }: SignalCardProps) {
+export function SignalCard({ signal, onSave, onExecute, brokerConnected = false }: SignalCardProps) {
   const isLong = signal.overallDirection === 'LONG';
   const isShort = signal.overallDirection === 'SHORT';
+  const [isAssessing, setIsAssessing] = useState(false);
+  const [isExecuting, setIsExecuting] = useState(false);
+  const [riskPreview, setRiskPreview] = useState<RiskAssessPreview | null>(null);
+  const [showRiskPreview, setShowRiskPreview] = useState(false);
+
+  const assessTrade = async () => {
+    if (!brokerConnected) {
+      toast.error('Conecta un broker para ejecutar trades');
+      return;
+    }
+
+    setIsAssessing(true);
+    setShowRiskPreview(true);
+    try {
+      const res = await fetch('/api/trade/assess', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confluence: signal }),
+      });
+      const data = await res.json();
+      if (data.assessment) {
+        setRiskPreview(data.assessment);
+      } else {
+        setRiskPreview({
+          allowed: false,
+          reason: data.error || 'Assessment failed',
+          positionSize: 0,
+          positionValue: 0,
+          riskAmount: 0,
+          riskPercent: 0,
+          warnings: [],
+        });
+      }
+    } catch {
+      setRiskPreview({
+        allowed: false,
+        reason: 'Error de conexión',
+        positionSize: 0,
+        positionValue: 0,
+        riskAmount: 0,
+        riskPercent: 0,
+        warnings: [],
+      });
+    }
+    setIsAssessing(false);
+  };
+
+  const executeTrade = async () => {
+    setIsExecuting(true);
+    try {
+      const res = await fetch('/api/trade', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confluence: signal }),
+      });
+      const data = await res.json();
+
+      if (data.executed) {
+        toast.success(`Orden ejecutada: ${signal.symbol} ${isLong ? 'BUY' : 'SELL'} x${data.risk?.positionSize || '?'}`);
+        if (onExecute) onExecute(signal);
+      } else {
+        toast.error(`Trade rechazado: ${data.error || data.risk?.reason || 'Razón desconocida'}`);
+      }
+    } catch {
+      toast.error('Error al ejecutar trade');
+    }
+    setIsExecuting(false);
+    setShowRiskPreview(false);
+    setRiskPreview(null);
+  };
 
   return (
     <div
@@ -80,17 +164,90 @@ export function SignalCard({ signal, onSave }: SignalCardProps) {
         {signal.recommendation}
       </p>
 
-      {onSave && (
-        <Button
-          size="sm"
-          variant="ghost"
-          className="w-full text-[10px] h-6 text-gray-400 hover:text-white"
-          onClick={() => onSave(signal)}
-        >
-          <Save className="w-3 h-3 mr-1" />
-          Guardar Señal
-        </Button>
+      {/* Risk Preview */}
+      {showRiskPreview && riskPreview && (
+        <div className={`p-2 rounded mb-2 text-[9px] ${
+          riskPreview.allowed ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-red-500/10 border border-red-500/20'
+        }`}>
+          {riskPreview.allowed ? (
+            <>
+              <div className="flex items-center gap-1 mb-1">
+                <Zap className="w-3 h-3 text-emerald-400" />
+                <span className="text-emerald-400 font-semibold">Trade permitido</span>
+              </div>
+              <div className="grid grid-cols-2 gap-1 text-gray-300">
+                <span>Posición: {riskPreview.positionSize} shares</span>
+                <span>Valor: ${riskPreview.positionValue.toFixed(2)}</span>
+                <span>Riesgo: ${riskPreview.riskAmount.toFixed(2)}</span>
+                <span>Riesgo%: {riskPreview.riskPercent.toFixed(2)}%</span>
+              </div>
+              {riskPreview.warnings.length > 0 && (
+                <div className="mt-1 space-y-0.5">
+                  {riskPreview.warnings.map((w, i) => (
+                    <div key={i} className="flex items-start gap-1 text-yellow-400">
+                      <AlertTriangle className="w-2.5 h-2.5 mt-0.5 flex-shrink-0" />
+                      <span>{w}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="flex items-start gap-1">
+              <AlertTriangle className="w-3 h-3 text-red-400 mt-0.5 flex-shrink-0" />
+              <span className="text-red-300">{riskPreview.reason}</span>
+            </div>
+          )}
+        </div>
       )}
+
+      {/* Action Buttons */}
+      <div className="flex gap-1.5">
+        {brokerConnected && signal.overallDirection !== 'NEUTRAL' && (
+          <>
+            {!showRiskPreview ? (
+              <Button
+                size="sm"
+                className="flex-1 text-[10px] h-6 bg-emerald-600 hover:bg-emerald-700"
+                onClick={assessTrade}
+                disabled={isAssessing}
+              >
+                {isAssessing ? (
+                  <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                ) : (
+                  <Zap className="w-3 h-3 mr-1" />
+                )}
+                Evaluar
+              </Button>
+            ) : riskPreview?.allowed ? (
+              <Button
+                size="sm"
+                className="flex-1 text-[10px] h-6 bg-emerald-600 hover:bg-emerald-700"
+                onClick={executeTrade}
+                disabled={isExecuting}
+              >
+                {isExecuting ? (
+                  <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                ) : (
+                  <Zap className="w-3 h-3 mr-1" />
+                )}
+                Confirmar
+              </Button>
+            ) : null}
+          </>
+        )}
+        {onSave && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="flex-1 text-[10px] h-6 text-gray-400 hover:text-white"
+            onClick={() => onSave(signal)}
+          >
+            <Save className="w-3 h-3 mr-1" />
+            Guardar
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

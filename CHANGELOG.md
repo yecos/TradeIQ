@@ -6,6 +6,112 @@ El formato se basa en [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 
 ---
 
+## [0.13.0] - 2026-05-18
+
+### Agregado
+- **FEATURE**: AES-256-GCM Encryption para API keys (`src/lib/crypto.ts`)
+  - Encripta API keys antes de guardarlas en la base de datos
+  - Scrypt key derivation desde ENCRYPTION_KEY env variable
+  - Random IV + salt por encriptación (misma clave → diferente ciphertext)
+  - Authentication tag detecta manipulación de datos
+  - `isEncrypted()` para detectar si un valor está encriptado
+  - `generateSecureToken()` para tokens aleatorios seguros
+- **FEATURE**: Middleware de seguridad (`middleware.ts`)
+  - Rate limiting: 60 requests/min por IP (in-memory)
+  - Security headers: X-Content-Type-Options, X-Frame-Options, X-XSS-Protection, Referrer-Policy
+  - Protección de endpoints de trade execution
+  - Request logging
+- **FEATURE**: API keys encriptadas en base de datos
+  - broker/route.ts encripta apiKey y apiSecret antes de guardar
+  - Desencripta solo cuando necesita conectar al broker
+  - Nunca expone keys completas al frontend (mask: `***last4`)
+- **FEATURE**: 15 nuevos tests de crypto (199 total)
+
+### Cambios
+- **CHANGE**: broker/route.ts ahora encripta/desencripta API keys con AES-256-GCM
+- **CHANGE**: broker/route.ts retorna keys enmascaradas al frontend (sin texto plano)
+
+---
+
+## [0.12.0] - 2026-05-18
+
+### Agregado
+- **FEATURE**: Position Tracker — seguimiento de posiciones, P&L y métricas de rendimiento
+  - `src/lib/broker/position-tracker.ts` — Tracker con portfolio snapshot, closed trades, performance metrics
+  - Portfolio snapshot: equity, unrealized/realized P&L, daily P&L, position count
+  - Closed trade recording con: entry/exit price, P&L, duración, side
+  - Performance metrics: win rate, profit factor, avg win/loss, best/worst trade, streak, avg duration
+  - Equity history (max 1440 puntos = 24h a 1-min intervalos)
+  - Daily P&L reset para tracking diario
+- **FEATURE**: API endpoint `GET /api/broker/portfolio` — snapshot + posiciones + métricas
+- **FEATURE**: 16 nuevos tests de PositionTracker (184 total)
+
+---
+
+## [0.11.0] - 2026-05-18
+
+### Agregado
+- **FEATURE**: Order Manager — ciclo de vida completo de ejecución de trades
+  - `src/lib/broker/order-manager.ts` — Orquesta: ConfluenceResult → RiskEngine → BrokerProvider
+  - Flujo: assessTrade (pre-flight) → executeTrade (confirmación) → orden al broker
+  - Position sizing automático basado en riesgo y distancia al stop
+  - BuildAccountSnapshot desde datos reales del broker
+  - Configuración de riesgo ajustable en runtime
+- **FEATURE**: API endpoints para ejecución de trades
+  - `POST /api/trade` — Ejecuta trade con validación de riesgo completa
+  - `POST /api/trade/assess` — Pre-flight risk assessment sin ejecutar
+- **FEATURE**: SignalCard mejorada con botón "Ejecutar Trade"
+  - Botón "Evaluar" → llama assess → muestra preview de riesgo
+  - Botón "Confirmar" → ejecuta el trade
+  - Muestra: posición, valor, riesgo $, riesgo %, warnings
+  - Deshabilitado si no hay broker conectado
+- **FEATURE**: 18 nuevos tests de OrderManager (168 total)
+
+### Cambios
+- **CHANGE**: SignalCard ahora acepta prop `brokerConnected` para habilitar ejecución
+- **CHANGE**: page.tsx pasa `brokerConfig?.isActive` a SignalCard
+
+---
+
+## [0.10.0] - 2026-05-18
+
+### Agregado
+- **FEATURE**: Broker Integration — Provider Pattern para operaciones de broker (ADR-002)
+  - `src/lib/broker/broker-interface.ts` — Interfaz genérica `BrokerProvider` con tipos: BrokerAccount, BrokerPosition, BrokerOrder, OrderRequest, ConnectionTestResult
+  - `src/lib/broker/alpaca-broker.ts` — Implementación completa de Alpaca Markets API (paper + live)
+    - Autenticación con API Key + Secret
+    - Operaciones: getAccount, getPositions, submitOrder, cancelOrder, closePosition, closePositionPartial
+    - Timeout de 10s por request, manejo de errores HTTP (401, 403, 404, 429)
+    - Mapeo automático de respuestas Alpaca a tipos internos
+  - `src/lib/broker/mock-broker.ts` — Broker simulado para testing y fallback
+    - Simula órdenes market (fill inmediato) y limit (pendiente)
+    - Actualiza posiciones automáticamente al ejecutar órdenes
+    - Helpers de test: setPositions, setAccount, reset
+  - `src/lib/broker/broker-factory.ts` — Factory singleton con auto-fallback a MockBroker
+    - `initBroker(apiKey, apiSecret, isPaper)` → testConnection antes de aceptar
+    - `resetBroker()` → desconecta y vuelve a MockBroker
+- **FEATURE**: API endpoints de broker
+  - `GET /api/broker` — Retorna config + account info + positions + connection status
+  - `POST /api/broker` — Conecta/desconecta broker con testConnection automático
+  - `GET /api/broker/orders` — Lista órdenes (filtro por status)
+  - `POST /api/broker/orders` — Envía orden con validación completa
+  - `GET /api/broker/positions` — Lista posiciones (filtro por símbolo)
+  - `DELETE /api/broker/positions?symbol=X&qty=Y` — Cierra posición (total o parcial)
+- **FEATURE**: BrokerPanel rediseñado con datos reales
+  - Muestra equity, cash, buying power, market value de la cuenta
+  - Lista de posiciones con P&L no realizado y botón "Cerrar"
+  - Banner de advertencia LIVE TRADING cuando isPaper=false
+  - Auto-refresh cada 30s con TanStack Query
+  - Connection test automático al conectar
+- **FEATURE**: 26 nuevos tests de broker (150 total)
+
+### Cambios
+- **CHANGE**: `broker/route.ts` ahora usa BrokerFactory + testConnection antes de guardar credenciales
+- **CHANGE**: BrokerPanel ahora maneja conexión/desconexión internamente con useMutation
+- **CHANGE**: page.tsx callbacks saveBrokerConfig/disconnectBroker simplificados (solo actualizan estado local)
+
+---
+
 ## [0.9.0] - 2026-05-18
 
 ### Agregado
