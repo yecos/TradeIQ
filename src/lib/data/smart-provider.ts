@@ -400,13 +400,13 @@ export class SmartProvider implements MarketDataProvider {
 
     // If only one succeeded, use it (with freshness check)
     if (!cgCandles && binCandles) {
-      console.log(`[TradeIQ] CoinGecko failed for ${symbol}, using Binance only (${binCandles.length} candles)`);
+      console.warn(`[TradeIQ] CoinGecko failed for ${symbol}, using Binance only (${binCandles.length} candles)`);
       return binCandles.slice(-days);
     }
     if (cgCandles && !binCandles) {
       const fresh = this.isDataFresh(cgCandles, interval);
       if (fresh) {
-        console.log(`[TradeIQ] Binance failed for ${symbol}, using CoinGecko only (${cgCandles.length} candles, data fresh)`);
+        console.warn(`[TradeIQ] Binance failed for ${symbol}, using CoinGecko only (${cgCandles.length} candles, data fresh)`);
         return cgCandles;
       }
       // CoinGecko data is stale and Binance failed — try to append a synthetic "today" candle
@@ -415,11 +415,13 @@ export class SmartProvider implements MarketDataProvider {
       return cgCandles;
     }
 
-    // Both succeeded — MERGE! (at this point both are guaranteed non-null)
-    const merged = this.mergeCandleData(cgCandles!, binCandles!);
+    // Both succeeded — MERGE! (at this point both are guaranteed non-null by the checks above)
+    const cgData = cgCandles as Candle[];
+    const binData = binCandles as Candle[];
+    const merged = this.mergeCandleData(cgData, binData);
     const elapsed = Date.now() - startTime;
-    console.log(
-      `[TradeIQ] Merged candles for ${symbol}: CG=${cgCandles!.length}, BIN=${binCandles!.length} → ${merged.length} candles (${elapsed}ms)`
+    console.warn(
+      `[TradeIQ] Merged candles for ${symbol}: CG=${cgData.length}, BIN=${binData.length} → ${merged.length} candles (${elapsed}ms)`
     );
     return merged.slice(-days);
   }
