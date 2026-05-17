@@ -6,6 +6,47 @@ El formato se basa en [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 
 ---
 
+## [0.18.0] - 2026-05-18
+
+### Agregado
+- **FEATURE**: Audit Trail — registro automático de eventos de trading (`src/lib/audit/trade-audit.ts`)
+  - 6 tipos de evento: signal_generated, trade_assessed, trade_executed, trade_closed, risk_warning, alert_triggered
+  - Filtros: por símbolo, tipo, rango de fechas
+  - Exportación CSV con headers en español
+  - Límite de 500 eventos en memoria, singleton pattern
+  - Labels en español para cada tipo de evento
+- **FEATURE**: API de Audit Trail (`/api/journal/audit`)
+  - GET: eventos recientes con filtros (limit, symbol, eventType)
+  - POST: log de nuevos eventos de auditoría
+- **FEATURE**: API de Journal mejorada (`/api/journal`)
+  - GET ?format=csv: descarga CSV con headers en español
+  - GET ?stats=true: estadísticas (totalTrades, winRate, avgPnl, profitFactor, avgRR, best/worst)
+  - DELETE ?id=xxx: eliminar entrada de bitácora
+  - POST ahora auto-loguea eventos de auditoría
+- **FEATURE**: Hook `useJournal` (`src/hooks/use-journal.ts`)
+  - TanStack Query: entries (60s), stats (60s), auditEvents (30s)
+  - Mutations: addEntry, deleteEntry, exportCSV, logAuditEvent
+- **FEATURE**: JournalPanel reescrito (`src/components/trading/journal-panel.tsx`)
+  - Stats grid: Total Trades, Win Rate, Avg P&L, Profit Factor
+  - Formulario mejorado: resultado, P&L, selector de vectores (6 pills), lecciones
+  - Lista con bordes de color (verde=ganada, rojo=perdida), iconos de dirección, vector tags
+  - Audit Trail toggle: sección colapsable con eventos recientes
+  - Botón exportar CSV (Download icon)
+- **FEATURE**: 21 nuevos tests de audit (317 total)
+  - Event logging: signal, trade executed, trade closed, risk warning
+  - Auto-generated id and timestamp
+  - Event retrieval: chronological order, limit, by symbol, by type, by date range
+  - CSV export: headers and data, empty log
+  - Clear events
+  - Max events limit (500)
+  - Journal stats: win rate, profit factor, average P&L, average R:R
+
+### Cambios
+- **CHANGE**: JournalPanel ahora es self-contained (usa useJournal hook internamente)
+- **CHANGE**: page.tsx simplificado (removido estado local de journal)
+
+---
+
 ## [0.17.0] - 2026-05-18
 
 ### Agregado

@@ -42,20 +42,6 @@ import {
 import { toast } from 'sonner';
 import { LoadingScreen } from '@/components/loading-screen';
 
-interface JournalEntry {
-  id: string;
-  symbol: string;
-  direction: string;
-  entryPrice: number;
-  exitPrice?: number;
-  stopLoss: number;
-  takeProfit: number;
-  result?: string;
-  pnl?: number;
-  notes: string;
-  createdAt: string;
-}
-
 interface BrokerConfig {
   id?: string;
   brokerName: string;
@@ -95,7 +81,7 @@ export default function TradeIQDashboard() {
   const [macroAnalysis, setMacroAnalysis] = useState<MacroAnalysis | null>(null);
   const [confluence, setConfluence] = useState<ConfluenceResult | null>(null);
   const [analysisForSymbol, setAnalysisForSymbol] = useState<string>('');
-  const [journalEntries, setJournalEntries] = useState<JournalEntry[]>([]);
+  // Journal entries are now managed by JournalPanel via useJournal hook
   const [brokerConfig, setBrokerConfig] = useState<BrokerConfig | null>(null);
   const [activeTab, setActiveTab] = useState('analysis');
   const [searchSymbol, setSearchSymbol] = useState('');
@@ -303,19 +289,7 @@ export default function TradeIQDashboard() {
     }
   }, []);
 
-  const addJournalEntry = useCallback(async (entry: Partial<JournalEntry>) => {
-    try {
-      await fetch('/api/journal', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(entry),
-      });
-      setJournalEntries(prev => [{ ...entry, id: Date.now().toString(), createdAt: new Date().toISOString() } as JournalEntry, ...prev]);
-      toast.success('Entrada guardada en bitácora');
-    } catch {
-      toast.error('Error al guardar entrada');
-    }
-  }, []);
+  // Journal entry management moved to JournalPanel + useJournal hook
 
   const saveBrokerConfig = useCallback(async (config: Partial<BrokerConfig>) => {
     // BrokerPanel now handles the API call internally
@@ -449,7 +423,7 @@ export default function TradeIQDashboard() {
         </TabsContent>
 
         <TabsContent value="journal" className="h-full m-0 p-3 overflow-y-auto custom-scrollbar">
-          <JournalPanel entries={journalEntries} onAddEntry={addJournalEntry} />
+          <JournalPanel />
         </TabsContent>
 
         <TabsContent value="broker" className="h-full m-0 p-3 overflow-y-auto custom-scrollbar">
