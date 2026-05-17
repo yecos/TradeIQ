@@ -4,6 +4,9 @@ import { generateConfluence } from '@/lib/confluence-engine';
 import { analyzeTechnical } from '@/lib/technical-analysis';
 import { detectPatterns } from '@/lib/pattern-detection';
 import { analyzeVolume } from '@/lib/volume-analysis';
+import { analyzeNews } from '@/lib/news-analysis';
+import { analyzeSentiment } from '@/lib/sentiment-analysis';
+import { analyzeMacro } from '@/lib/macro-analysis';
 
 export async function POST(request: NextRequest) {
   try {
@@ -15,118 +18,71 @@ export async function POST(request: NextRequest) {
     }
 
     const enabledVectors: string[] = vectors || ['technical', 'pattern', 'volume'];
-    const candles = await getCandles(symbol, 180);
 
-    if (candles.length < 30) {
-      return NextResponse.json({ error: 'Insufficient data' }, { status: 400 });
-    }
+    // Hard timeout to prevent serverless function timeout
+    const result = await Promise.race([
+      runAnalysis(symbol, enabledVectors),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Analysis timed out')), 15000)
+      ),
+    ]);
 
-    // Run analyses — only for enabled vectors (avoid wasted computation)
-    const technical = enabledVectors.includes('technical') ? analyzeTechnical(candles) : null;
-    const patterns = enabledVectors.includes('pattern') ? detectPatterns(candles) : null;
-    const volume = enabledVectors.includes('volume') ? analyzeVolume(candles) : null;
-
-    // Generate confluence — PASS precomputed results to avoid double computation
-    // News/sentiment/macro are computed inside generateConfluence (simulated)
-    const confluence = generateConfluence(candles, symbol, enabledVectors, {
-      technical,
-      patterns,
-      volume,
-    });
-
-    // Extract news/sentiment/macro from confluence's internal computation
-    // We need to compute them separately for the API response
-    const news = enabledVectors.includes('news')
-      ? extractNewsFromConfluence(confluence, symbol)
-      : null;
-    const sentiment = enabledVectors.includes('sentiment')
-      ? extractSentimentFromConfluence(confluence, symbol)
-      : null;
-    const macro = enabledVectors.includes('macro')
-      ? extractMacroFromConfluence(confluence)
-      : null;
-
-    return NextResponse.json({
-      symbol,
-      technical,
-      patterns,
-      volume,
-      news,
-      sentiment,
-      macro,
-      confluence,
-      timestamp: Date.now(),
-    });
+    return NextResponse.json(result);
   } catch (error) {
     console.error('Analysis error:', error);
     return NextResponse.json({ error: 'Analysis failed' }, { status: 500 });
   }
 }
 
-/**
- * Extract NewsAnalysis from confluence signals.
- * Since generateConfluence computes news internally, we reconstruct the structured data
- * from the vector signals it produced.
- */
-function extractNewsFromConfluence(confluence: { vectorSignals: { vectorId: string; vectorName: string; direction: string; strength: number; confidence: number; detail: string }[] }, symbol: string) {
-  const newsSignal = confluence.vectorSignals.find(s => s.vectorId === 'news');
-  if (!newsSignal) return null;
+async function runAnalysis(symbol: string, enabledVectors: string[]) {
+  const candles = await getCandles(symbol, 180);
+
+  if (candles.length < 30) {
+    return { error: 'Insufficient data' };
+  }
+
+  // Run ALL analyses in PARALLEL — sync ones complete instantly,
+  // async ones (news/sentiment/macro) run concurrently with 8s timeouts
+  const [technical, patterns, volume, news, sentiment, macro] = await Promise.all([
+    enabledVectors.includes('technical')
+      ? Promise.resolve(analyzeTechnical(candles))
+      : Promise.resolve(null),
+    enabledVectors.includes('pattern')
+      ? Promise.resolve(detectPatterns(candles))
+      : Promise.resolve(null),
+    enabledVectors.includes('volume')
+      ? Promise.resolve(analyzeVolume(candles))
+      : Promise.resolve(null),
+    enabledVectors.includes('news')
+      ? analyzeNews(symbol)
+      : Promise.resolve(null),
+    enabledVectors.includes('sentiment')
+      ? analyzeSentiment(symbol)
+      : Promise.resolve(null),
+    enabledVectors.includes('macro')
+      ? analyzeMacro(symbol)
+      : Promise.resolve(null),
+  ]);
+
+  // Generate confluence — pass precomputed results (no double computation)
+  const confluence = generateConfluence(candles, symbol, enabledVectors, {
+    technical,
+    patterns,
+    volume,
+    news,
+    sentiment,
+    macro,
+  });
 
   return {
-    sentiment: newsSignal.direction === 'LONG' ? newsSignal.strength / 100 :
-                newsSignal.direction === 'SHORT' ? -(newsSignal.strength / 100) : 0,
-    sentimentLabel: newsSignal.direction === 'LONG' ? (newsSignal.strength > 60 ? 'very_bullish' : 'bullish') :
-                    newsSignal.direction === 'SHORT' ? (newsSignal.strength > 60 ? 'very_bearish' : 'bearish') : 'neutral' as const,
-    headlines: [
-      {
-        title: newsSignal.detail,
-        sentiment: newsSignal.direction === 'LONG' ? 0.5 : newsSignal.direction === 'SHORT' ? -0.5 : 0,
-        impact: 'medium' as const,
-        date: new Date().toISOString(),
-      },
-    ],
-    signals: [newsSignal],
-  };
-}
-
-function extractSentimentFromConfluence(confluence: { vectorSignals: { vectorId: string; vectorName: string; direction: string; strength: number; confidence: number; detail: string }[] }, _symbol: string) {
-  const sentSignal = confluence.vectorSignals.find(s => s.vectorId === 'sentiment');
-  if (!sentSignal) return null;
-
-  const socialSent = sentSignal.direction === 'LONG' ? sentSignal.strength / 100 :
-                     sentSignal.direction === 'SHORT' ? -(sentSignal.strength / 100) : 0;
-  const fearGreed = Math.round(50 + socialSent * 30);
-
-  return {
-    fearGreedIndex: fearGreed,
-    socialSentiment: socialSent,
-    putCallRatio: socialSent > 0 ? 0.8 : socialSent < 0 ? 1.2 : 1.0,
-    signals: [sentSignal],
-  };
-}
-
-function extractMacroFromConfluence(confluence: { vectorSignals: { vectorId: string; vectorName: string; direction: string; strength: number; confidence: number; detail: string }[] }) {
-  const macroSignal = confluence.vectorSignals.find(s => s.vectorId === 'macro');
-  if (!macroSignal) return null;
-
-  return {
-    fedRateTrend: 'neutral' as const,
-    economicEvents: [
-      {
-        event: 'Fed Interest Rate Decision',
-        impact: 'high' as const,
-        date: new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
-        forecast: '5.25-5.50%',
-        previous: '5.25-5.50%',
-      },
-      {
-        event: 'CPI Data Release',
-        impact: 'high' as const,
-        date: new Date(Date.now() + 3 * 86400000).toISOString().split('T')[0],
-        forecast: '+0.3%',
-        previous: '+0.4%',
-      },
-    ],
-    signals: [macroSignal],
+    symbol,
+    technical,
+    patterns,
+    volume,
+    news,
+    sentiment,
+    macro,
+    confluence,
+    timestamp: Date.now(),
   };
 }
