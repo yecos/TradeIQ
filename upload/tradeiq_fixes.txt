@@ -1,0 +1,481 @@
+========================================================
+  TRADEIQ — FIXES DE AUDITORÍA
+  Generado: 2026-05-17
+========================================================
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  CRÍTICO #1 — Secret hardcodeado en middleware y docker-compose
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ARCHIVO: middleware.ts
+PROBLEMA: El fallback 'tradeiq-dev-secret-fallback' permite que la app
+arranque en producción sin NEXTAUTH_SECRET, usando un secreto público.
+
+ANTES:
+  const token = await getToken({
+    req: request,
+    secret: process.env.NEXTAUTH_SECRET || 'tradeiq-dev-secret-fallback',
+  });
+
+DESPUÉS:
+  const secret = process.env.NEXTAUTH_SECRET;
+  if (!secret) {
+    console.error('[middleware] NEXTAUTH_SECRET no está definido. Abortando.');
+    return NextResponse.json(
+      { error: 'Configuración de servidor inválida.' },
+      { status: 500 }
+    );
+  }
+  const token = await getToken({ req: request, secret });
+
+---
+
+ARCHIVO: docker-compose.yml
+PROBLEMA: El fallback 'tradeiq-dev-secret-change-in-production' se usará
+si no se define la variable en el entorno del host.
+
+ANTES:
+  - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:-tradeiq-dev-secret-change-in-production}
+
+DESPUÉS:
+  - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:?Error: define NEXTAUTH_SECRET en tu .env}
+
+La sintaxis :? hace que docker compose falle con un mensaje claro
+si la variable no está definida, en lugar de usar el fallback.
+
+---
+
+ARCHIVO: src/app/api/auth/[...nextauth]/route.ts (o donde inicialices NextAuth)
+Agregar validación en startup:
+
+  if (!process.env.NEXTAUTH_SECRET) {
+    throw new Error(
+      'NEXTAUTH_SECRET no está definido. ' +
+      'Define esta variable en .env.local antes de arrancar.'
+    );
+  }
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  CRÍTICO #2 — Rate limiter en memoria (no funciona multi-instancia)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ARCHIVO: middleware.ts
+PROBLEMA: El Map() vive en memoria de una sola instancia de Node.
+En Vercel (serverless) o con múltiples réplicas Docker cada instancia
+tiene sus propios contadores independientes, haciendo el rate limit inútil.
+
+OPCIÓN A — Upstash Redis (recomendada para Vercel/Edge):
+
+  Instalar: bun add @upstash/ratelimit @upstash/redis
+
+  // middleware.ts
+  import { Ratelimit } from '@upstash/ratelimit';
+  import { Redis } from '@upstash/redis';
+
+  const ratelimit = new Ratelimit({
+    redis: Redis.fromEnv(),               // UPSTASH_REDIS_REST_URL + TOKEN en .env
+    limiter: Ratelimit.slidingWindow(60, '1 m'),
+    analytics: true,
+  });
+
+  // Dentro de middleware():
+  const ip = request.headers.get('x-forwarded-for') ?? '127.0.0.1';
+  const { success } = await ratelimit.limit(ip);
+  if (!success) {
+    return NextResponse.json(
+      { error: 'Rate limit excedido. Espera un momento.' },
+      { status: 429 }
+    );
+  }
+
+  Variables de entorno a agregar en .env.local:
+    UPSTASH_REDIS_REST_URL=https://xxxxx.upstash.io
+    UPSTASH_REDIS_REST_TOKEN=xxxxxxxxxxxxx
+
+OPCIÓN B — Si usas Docker con una sola instancia y no quieres Redis:
+  Mantén el Map() pero documenta explícitamente que el rate limit
+  no funciona en despliegues multi-réplica. Agrega un comentario
+  visible en el código advirtiendo esta limitación.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ALTO #1 — SQLite en producción para app multi-usuario
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ARCHIVO: prisma/schema.prisma
+PROBLEMA: SQLite no admite escrituras concurrentes. Con varios usuarios
+activos habrá contención de bloqueos y posible corrupción de datos.
+
+PASO 1 — Cambiar el datasource en schema.prisma:
+
+  ANTES:
+    datasource db {
+      provider = "sqlite"
+      url      = env("DATABASE_URL")
+    }
+
+  DESPUÉS:
+    datasource db {
+      provider = "postgresql"
+      url      = env("DATABASE_URL")
+    }
+
+PASO 2 — Cambiar DATABASE_URL en .env.local:
+
+  ANTES:
+    DATABASE_URL="file:./db/tradeiq.db"
+
+  DESPUÉS:
+    DATABASE_URL="postgresql://user:password@localhost:5432/tradeiq"
+
+PASO 3 — Actualizar docker-compose.yml para incluir Postgres:
+
+  services:
+    postgres:
+      image: postgres:16-alpine
+      environment:
+        POSTGRES_USER: tradeiq
+        POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?define POSTGRES_PASSWORD}
+        POSTGRES_DB: tradeiq
+      volumes:
+        - postgres-data:/var/lib/postgresql/data
+      healthcheck:
+        test: ["CMD-SHELL", "pg_isready -U tradeiq"]
+        interval: 10s
+        timeout: 5s
+        retries: 5
+
+    tradeiq:
+      depends_on:
+        postgres:
+          condition: service_healthy
+      environment:
+        - DATABASE_URL=postgresql://tradeiq:${POSTGRES_PASSWORD}@postgres:5432/tradeiq
+      # ... resto igual
+
+  volumes:
+    postgres-data:
+
+PASO 4 — Regenerar migraciones:
+  bun run db:migrate
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ALTO #2 — Rutas de análisis sin autenticación
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ARCHIVO: middleware.ts
+PROBLEMA: /api/analyze consume análisis costosos y llama a Polygon.io
+(API de pago) sin requerir autenticación. /api/market también es público.
+
+FIX — Agregar /api/analyze a las rutas protegidas:
+
+  ANTES:
+    const PROTECTED_ROUTES = [
+      '/api/trade',
+      '/api/broker',
+    ];
+
+  DESPUÉS:
+    const PROTECTED_ROUTES = [
+      '/api/trade',
+      '/api/broker',
+      '/api/analyze',
+      '/api/signals',
+      '/api/journal',
+    ];
+
+    // Mover también los write-protected a protected completo:
+    // Eliminar WRITE_PROTECTED_ROUTES o dejarlo solo para rutas
+    // que genuinamente deban ser públicas en GET.
+
+Para /api/market, si se decide mantenerlo público, al menos
+añadir un API key de servicio (header X-Service-Key) para
+controlar quién puede consumirlo desde fuera del frontend.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ALTO #3 — API keys de broker sin cifrado garantizado
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ARCHIVOS: src/app/api/broker/route.ts y src/lib/types.ts (estimado)
+PROBLEMA: ENCRYPTION_KEY en docker-compose no tiene valor por defecto,
+lo que sugiere que si no se define, el cifrado no se aplica.
+
+FIX #1 — Validar ENCRYPTION_KEY en startup (igual que NEXTAUTH_SECRET):
+
+  // src/lib/crypto.ts (archivo nuevo o existente)
+  const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY;
+  if (!ENCRYPTION_KEY || ENCRYPTION_KEY.length < 32) {
+    throw new Error(
+      'ENCRYPTION_KEY debe tener al menos 32 caracteres. ' +
+      'Genera uno con: openssl rand -hex 32'
+    );
+  }
+
+FIX #2 — Cifrado AES-256-GCM para API keys antes de persistir en DB:
+
+  import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
+
+  const ALGO = 'aes-256-gcm';
+  const KEY = Buffer.from(process.env.ENCRYPTION_KEY!, 'hex'); // 32 bytes
+
+  export function encryptApiKey(plaintext: string): string {
+    const iv = randomBytes(12);
+    const cipher = createCipheriv(ALGO, KEY, iv);
+    const encrypted = Buffer.concat([
+      cipher.update(plaintext, 'utf8'),
+      cipher.final(),
+    ]);
+    const tag = cipher.getAuthTag();
+    return [iv.toString('hex'), tag.toString('hex'), encrypted.toString('hex')].join(':');
+  }
+
+  export function decryptApiKey(ciphertext: string): string {
+    const [ivHex, tagHex, encHex] = ciphertext.split(':');
+    const iv = Buffer.from(ivHex, 'hex');
+    const tag = Buffer.from(tagHex, 'hex');
+    const encrypted = Buffer.from(encHex, 'hex');
+    const decipher = createDecipheriv(ALGO, KEY, iv);
+    decipher.setAuthTag(tag);
+    return decipher.update(encrypted) + decipher.final('utf8');
+  }
+
+Usar encryptApiKey() antes de guardar en DB y decryptApiKey()
+al recuperar las credenciales para llamar a Alpaca.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ALTO #4 — Vectores simulados mezclados con datos reales
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ARCHIVOS: src/lib/confluence-engine.ts, src/lib/vector-definitions.ts,
+          src/components/trading/signal-card.tsx
+
+PROBLEMA: El motor mezcla vectores reales (técnicos, patrones, volumen)
+con simulados (noticias, sentimiento, macro) para generar señales
+con SL y TP sin advertir suficientemente al usuario.
+
+FIX — Agregar campo `isSimulated` en la definición de cada vector:
+
+  // vector-definitions.ts
+  export const VECTORS = {
+    technical:  { ... , isSimulated: false },
+    patterns:   { ... , isSimulated: false },
+    volume:     { ... , isSimulated: false },
+    news:       { ... , isSimulated: true  },
+    sentiment:  { ... , isSimulated: true  },
+    macro:      { ... , isSimulated: true  },
+  };
+
+FIX — En el motor de confluencia, agregar advertencia a la señal:
+
+  // confluence-engine.ts
+  const hasSimulatedVectors = activeVectors.some(v => VECTORS[v].isSimulated);
+
+  return {
+    ...signal,
+    hasSimulatedData: hasSimulatedVectors,
+    disclaimer: hasSimulatedVectors
+      ? 'Esta señal incluye vectores con datos simulados. No usar para trading real.'
+      : null,
+  };
+
+FIX — En el componente signal-card.tsx, mostrar advertencia prominente:
+
+  {signal.hasSimulatedData && (
+    <div className="bg-amber-50 border border-amber-300 rounded p-2 text-amber-800 text-xs font-medium">
+      ⚠ Señal generada con datos simulados — no apta para trading real
+    </div>
+  )}
+
+  // Opcional: deshabilitar el botón de ejecución si hay datos simulados:
+  <Button disabled={signal.hasSimulatedData}>
+    {signal.hasSimulatedData ? 'Datos simulados activos' : 'Ejecutar operación'}
+  </Button>
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  MEDIO #1 — Headers de seguridad incompletos
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ARCHIVO: middleware.ts — función addSecurityHeaders()
+
+  ANTES:
+    function addSecurityHeaders(response: NextResponse): void {
+      response.headers.set('X-Content-Type-Options', 'nosniff');
+      response.headers.set('X-Frame-Options', 'DENY');
+      response.headers.set('X-XSS-Protection', '1; mode=block');
+      response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+    }
+
+  DESPUÉS:
+    function addSecurityHeaders(response: NextResponse): void {
+      response.headers.set('X-Content-Type-Options', 'nosniff');
+      response.headers.set('X-Frame-Options', 'DENY');
+      response.headers.set('X-XSS-Protection', '1; mode=block');
+      response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+      response.headers.set(
+        'Strict-Transport-Security',
+        'max-age=63072000; includeSubDomains; preload'
+      );
+      response.headers.set(
+        'Content-Security-Policy',
+        [
+          "default-src 'self'",
+          "script-src 'self' 'unsafe-inline'",   // ajustar si usas CDN
+          "style-src 'self' 'unsafe-inline'",
+          "img-src 'self' data: https:",
+          "connect-src 'self' https://api.alpaca.markets https://api.polygon.io wss:",
+          "frame-ancestors 'none'",
+        ].join('; ')
+      );
+      response.headers.set(
+        'Permissions-Policy',
+        'camera=(), microphone=(), geolocation=()'
+      );
+    }
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  MEDIO #2 — Tests mínimos recomendados
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Tests prioritarios a crear (en orden de impacto):
+
+1. src/lib/__tests__/confluence-engine.test.ts
+   - Verificar que con 0 vectores activos devuelve NEUTRAL
+   - Verificar que señales con vectores simulados tienen hasSimulatedData=true
+   - Verificar cálculo correcto de SL/TP para posición LONG y SHORT
+
+2. src/lib/__tests__/technical-analysis.test.ts
+   - RSI: valor entre 0-100, sobrecompra >70, sobreventa <30
+   - MACD: cruce alcista y bajista con datos de ejemplo
+
+3. src/app/api/__tests__/analyze.test.ts (integration)
+   - Request sin auth → 401
+   - Request con auth y símbolo inválido → 400
+   - Request válida → 200 con estructura correcta de señal
+
+Ejemplo de test básico del motor de confluencia:
+
+  // src/lib/__tests__/confluence-engine.test.ts
+  import { describe, it, expect } from 'vitest';
+  import { runConfluenceEngine } from '../confluence-engine';
+
+  describe('confluence-engine', () => {
+    it('devuelve NEUTRAL con vectores vacíos', () => {
+      const result = runConfluenceEngine([], mockCandles);
+      expect(result.direction).toBe('NEUTRAL');
+      expect(result.confluenceScore).toBe(0);
+    });
+
+    it('señal con vector simulado tiene hasSimulatedData=true', () => {
+      const result = runConfluenceEngine(['news'], mockCandles);
+      expect(result.hasSimulatedData).toBe(true);
+    });
+  });
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  MEDIO #3 — Auditar dependencia z-ai-web-dev-sdk
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PASOS:
+  1. Revisar el código fuente en node_modules/z-ai-web-dev-sdk/
+     o en su repositorio npm/GitHub antes de usar en producción.
+  2. Verificar que no hace llamadas de red no documentadas.
+  3. Si es solo un SDK interno o experimental, considerar
+     reemplazarlo con la integración directa que necesitas.
+  4. En cualquier caso, anclar la versión exacta en package.json:
+     "z-ai-web-dev-sdk": "0.0.17"   (ya está, mantenerlo así)
+  5. Agregar a dependabot o renovate para monitorear actualizaciones.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  MEDIO #4 — Validación de inputs en API routes con Zod
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Aplicar en cada route handler. Ejemplo para /api/analyze:
+
+  // src/app/api/analyze/route.ts
+  import { z } from 'zod';
+  import { NextRequest, NextResponse } from 'next/server';
+
+  const AnalyzeSchema = z.object({
+    symbol: z.string().min(1).max(10).regex(/^[A-Z]+$/),
+    vectors: z.array(z.enum(['technical','patterns','volume','news','sentiment','macro'])).min(1),
+    timeframe: z.enum(['1D','1W','1M']).optional().default('1D'),
+  });
+
+  export async function POST(request: NextRequest) {
+    const body = await request.json().catch(() => null);
+    const parsed = AnalyzeSchema.safeParse(body);
+
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: 'Parámetros inválidos', details: parsed.error.flatten() },
+        { status: 400 }
+      );
+    }
+
+    const { symbol, vectors, timeframe } = parsed.data;
+    // ... resto de la lógica
+  }
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  MEDIO #5 — Estrategia de branching básica
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Implementar GitHub Flow (simple y efectivo para equipos pequeños):
+
+  Branches:
+    main        → producción (protegido, solo PRs)
+    develop     → integración (opcional, para staging)
+    feature/*   → nuevas funcionalidades
+    fix/*       → correcciones de bugs
+    hotfix/*    → parches urgentes sobre main
+
+  Reglas para main en GitHub → Settings → Branches:
+    ✓ Require a pull request before merging
+    ✓ Require status checks to pass (lint + tests)
+    ✓ Restrict who can push to matching branches
+
+  Ejemplo de flujo:
+    git checkout -b fix/rate-limiter-redis
+    # ... cambios ...
+    git push origin fix/rate-limiter-redis
+    # Abrir PR → review → merge a main
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ORDEN DE IMPLEMENTACIÓN RECOMENDADO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Semana 1 (críticos):
+    1. Fix NEXTAUTH_SECRET (30 min)
+    2. Proteger /api/analyze con autenticación (15 min)
+    3. Disclaimer de vectores simulados en señales (1h)
+
+  Semana 2 (altos):
+    4. Validar ENCRYPTION_KEY y cifrar API keys (2h)
+    5. Actualizar headers de seguridad (30 min)
+    6. Agregar validación Zod a todas las API routes (3h)
+
+  Semana 3 (infra):
+    7. Migrar SQLite → PostgreSQL (2-4h)
+    8. Implementar rate limit con Redis/Upstash (1h)
+    9. Crear tests del motor de confluencia (3h)
+
+  Semana 4 (proceso):
+    10. Configurar branch protection en GitHub (30 min)
+    11. Auditar z-ai-web-dev-sdk (1h)
+    12. Tests de integración para rutas de API (4h)
+
+========================================================
+  FIN DEL DOCUMENTO DE FIXES
+  TradeIQ Audit v1.0 — 2026-05-17
+========================================================

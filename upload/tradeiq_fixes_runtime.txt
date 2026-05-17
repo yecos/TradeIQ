@@ -1,0 +1,475 @@
+========================================================
+  TRADEIQ — FIXES AUDITORÍA RUNTIME (PRODUCCIÓN)
+  URL: https://trade-iq-six.vercel.app
+  Generado: 2026-05-17
+  Puntuación producción: 3.8 / 10
+========================================================
+
+Esta auditoría complementa el archivo tradeiq_fixes.txt
+(auditoría de código fuente). Los fixes aquí son específicos
+a lo observado en la app desplegada en Vercel.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  CRÍTICO #1 — Dashboard completo accesible sin login
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PROBLEMA:
+  La ruta raíz "/" carga el dashboard completo sin requerir
+  autenticación. Tabs de Broker, Portafolio, Señales, Bitácora
+  y Alertas están visibles para cualquier visitante anónimo.
+  NextAuth está configurado en el código pero no se protege
+  la ruta principal en el middleware.
+
+FIX — middleware.ts:
+  Agregar "/" a las rutas protegidas con redirect a /login:
+
+  export async function middleware(request: NextRequest) {
+    const { pathname } = request.nextUrl;
+
+    // Proteger el dashboard principal
+    const isDashboard =
+      pathname === '/' ||
+      pathname.startsWith('/dashboard');
+
+    if (isDashboard) {
+      const token = await getToken({
+        req: request,
+        secret: process.env.NEXTAUTH_SECRET,
+      });
+
+      if (!token) {
+        const loginUrl = new URL('/login', request.url);
+        loginUrl.searchParams.set('callbackUrl', pathname);
+        return NextResponse.redirect(loginUrl);
+      }
+    }
+
+    // ... resto del middleware existente
+  }
+
+  // Actualizar el matcher:
+  export const config = {
+    matcher: ['/', '/dashboard/:path*', '/api/:path*'],
+  };
+
+FIX — Crear página de login si no existe:
+  src/app/login/page.tsx con formulario de email/contraseña
+  usando el signIn() de NextAuth, o registro de usuario nuevo.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  CRÍTICO #2 — Gráfico de velas en spinner infinito
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PROBLEMA:
+  El gráfico principal muestra "Cargando datos del gráfico…"
+  indefinidamente porque no hay API key de Polygon.io configurada
+  en el entorno de Vercel. No hay timeout, no hay mensaje de error,
+  no hay estado vacío accionable. El flujo completo de la app
+  queda bloqueado desde el primer segundo.
+
+FIX — src/components/trading/trading-chart.tsx:
+  Agregar manejo de error y timeout explícito:
+
+  const CHART_TIMEOUT_MS = 8000;
+
+  const [chartState, setChartState] = useState<
+    'loading' | 'error' | 'no-key' | 'ready'
+  >('loading');
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (chartState === 'loading') {
+        setChartState('no-key');
+      }
+    }, CHART_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // En el render, reemplazar el spinner genérico:
+  if (chartState === 'no-key') {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
+        <AlertCircle className="w-8 h-8 text-amber-500" />
+        <p className="text-sm font-medium">Sin datos de mercado</p>
+        <p className="text-xs text-center max-w-xs">
+          Configura tu API key de Polygon.io en{' '}
+          <button
+            onClick={() => setActiveTab('settings')}
+            className="text-blue-400 underline"
+          >
+            Ajustes
+          </button>{' '}
+          para ver datos reales.
+        </p>
+        <p className="text-xs text-amber-500">
+          Modo demo activo — datos simulados disponibles
+        </p>
+      </div>
+    );
+  }
+
+FIX — Variables de entorno en Vercel:
+  En el dashboard de Vercel → Settings → Environment Variables,
+  agregar:
+    POLYGON_API_KEY = tu_key_real
+    ALPACA_API_KEY  = tu_key_real
+    ALPACA_API_SECRET = tu_secret_real
+    NEXTAUTH_SECRET = (genera con: openssl rand -hex 32)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  CRÍTICO #3 — Badge "MOCK" sin advertencia de riesgo
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PROBLEMA:
+  La app muestra el badge "MOCK" pero no bloquea la generación
+  de señales ni advierte con suficiente prominencia que los datos
+  son inventados. Un usuario puede recibir señales LONG/SHORT con
+  SL y TP calculados sobre datos falsos sin saberlo claramente.
+
+FIX #1 — Banner global de modo demo:
+  Agregar en src/app/page.tsx o en el layout principal:
+
+  {isUsingMockData && (
+    <div className="w-full bg-red-950 border-b border-red-800 px-4 py-2 flex items-center gap-2">
+      <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />
+      <p className="text-xs text-red-300 font-medium">
+        MODO DEMO ACTIVO — Todos los datos son simulados.
+        Las señales generadas NO deben usarse para trading real.
+      </p>
+    </div>
+  )}
+
+FIX #2 — Bloquear el botón "Analizar" en modo mock:
+
+  <Button
+    onClick={handleAnalyze}
+    disabled={isUsingMockData && !userConfirmedMock}
+    title={isUsingMockData
+      ? 'Configura una API key real para analizar con datos reales'
+      : 'Ejecutar análisis'
+    }
+  >
+    {isUsingMockData ? 'Analizar (datos demo)' : 'Analizar'}
+  </Button>
+
+FIX #3 — Deshabilitar señales de trading en modo mock:
+  En signal-card.tsx, mostrar disclaimer y deshabilitar
+  cualquier acción de ejecución cuando los datos son simulados.
+  (Ver también tradeiq_fixes.txt — ALTO #4)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ALTO #1 — Sin onboarding para usuarios nuevos
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PROBLEMA:
+  Al entrar por primera vez el usuario ve:
+  - Watchlist vacía (no sabe cómo añadir símbolos)
+  - Gráfico en spinner (no sabe que necesita una API key)
+  - "Sin broker" con campos en "..." (no sabe cómo configurarlo)
+  - "Selecciona un símbolo y haz clic en Analizar" (sin
+    ningún símbolo disponible para seleccionar)
+  La app no guía al usuario en ningún paso inicial.
+
+FIX — Flujo de onboarding de 3 pasos (modal o wizard):
+
+  // src/components/onboarding/onboarding-wizard.tsx
+
+  const STEPS = [
+    {
+      id: 'watchlist',
+      title: 'Añade tu primer símbolo',
+      description: 'Escribe AAPL, NVDA o TSLA para empezar.',
+      action: 'Añadir símbolo',
+    },
+    {
+      id: 'api-key',
+      title: 'Conecta datos de mercado',
+      description: 'Obtén una API key gratis en polygon.io y pégala aquí.',
+      action: 'Configurar API key',
+      optional: true,
+      skipLabel: 'Continuar en modo demo',
+    },
+    {
+      id: 'analyze',
+      title: 'Ejecuta tu primer análisis',
+      description: 'Selecciona vectores y haz clic en Analizar.',
+      action: 'Ir al dashboard',
+    },
+  ];
+
+  Mostrar el wizard cuando:
+    - Es el primer acceso del usuario (localStorage flag)
+    - O la watchlist está vacía y no hay API key configurada
+
+FIX — Estado vacío accionable en watchlist:
+  Cuando watchlist.length === 0, mostrar:
+
+  <div className="flex flex-col items-center gap-2 p-4 text-center">
+    <p className="text-sm text-muted-foreground">
+      Añade símbolos para empezar
+    </p>
+    <Button size="sm" onClick={openAddSymbolDialog}>
+      + Añadir símbolo
+    </Button>
+    <p className="text-xs text-muted-foreground">
+      Sugerencias: AAPL · NVDA · TSLA · SPY · BTC-USD
+    </p>
+  </div>
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ALTO #2 — Vector "Order Flow" sin implementar visible
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PROBLEMA:
+  En producción aparecen 7 vectores (6/7 activos), incluyendo
+  "Order Flow" que en el README está listado como roadmap futuro.
+  El vector está presente en el panel y aparentemente activo,
+  pero no tiene implementación real. Incluirlo en el cálculo
+  de confluencia sin datos reales distorsiona las señales.
+
+FIX — Marcar el vector como "Próximamente" en el panel:
+
+  // src/lib/vector-definitions.ts
+  {
+    id: 'orderflow',
+    name: 'Order Flow',
+    description: 'Análisis del flujo de órdenes...',
+    isSimulated: true,
+    isComingSoon: true,   // nuevo campo
+    disabled: true,
+  }
+
+  // En vector-panel.tsx, si disabled === true:
+  <div className="opacity-40 pointer-events-none relative">
+    {/* contenido del vector */}
+    <span className="absolute top-2 right-2 text-xs bg-gray-700 px-2 py-0.5 rounded">
+      Próximamente
+    </span>
+  </div>
+
+FIX — Excluir del motor de confluencia:
+  En confluence-engine.ts, filtrar vectores con disabled=true
+  antes de calcular el score.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ALTO #3 — Panel de broker sin diagnóstico ni guía
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PROBLEMA:
+  El panel de broker muestra "Sin broker" y "..." en todos
+  los campos sin indicar qué falta ni cómo solucionarlo.
+
+FIX — Estado de broker con diagnóstico:
+
+  // src/components/trading/broker-panel.tsx
+  const brokerStatus = useBrokerStatus(); // hook existente o nuevo
+
+  if (!brokerStatus.configured) {
+    return (
+      <div className="flex flex-col gap-3 p-4">
+        <div className="flex items-center gap-2 text-amber-400">
+          <AlertCircle className="w-4 h-4" />
+          <span className="text-sm font-medium">Broker no configurado</span>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Para conectar tu cuenta de Alpaca Markets:
+        </p>
+        <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
+          <li>Crea una cuenta en alpaca.markets (paper trading gratis)</li>
+          <li>Ve a API Keys en tu dashboard de Alpaca</li>
+          <li>Copia tu API Key y Secret</li>
+          <li>Pégalos en la sección de Ajustes → Broker</li>
+        </ol>
+        <Button size="sm" onClick={() => setActiveTab('settings')}>
+          Ir a Ajustes →
+        </Button>
+      </div>
+    );
+  }
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  UX #1 — Gráfico duplicado en el layout
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PROBLEMA:
+  El HTML del index renderiza dos instancias del componente
+  de gráfico (con sus respectivos controles de timeframe).
+  Parece un bug donde el panel de análisis y el panel
+  principal se superponen o se renderizan dos veces.
+
+INVESTIGAR EN:
+  src/app/page.tsx — verificar que TradingChart solo se
+  instancia una vez. Buscar si hay un layout con dos paneles
+  que ambos incluyen el gráfico.
+
+  Posible causa: el componente de análisis tiene su propio
+  mini-gráfico que se está mostrando en lugar de ocultarse
+  hasta que el usuario cambie a la tab "Análisis".
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  UX #2 — Estados de conexión contradictorios
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PROBLEMA:
+  La UI muestra simultáneamente:
+    "Connecting to market data providers..."  → sugiere que intenta
+    Badge "MOCK"                              → indica que ya usa mock
+  El usuario no entiende el estado real del sistema.
+
+FIX — Lógica de estado del proveedor de datos:
+
+  type DataProviderStatus =
+    | 'connecting'      // intentando conectar con API key real
+    | 'connected'       // conectado a datos reales
+    | 'mock'            // sin API key, usando datos simulados
+    | 'error';          // fallo de conexión
+
+  Mostrar solo un mensaje según el estado:
+    'connecting' → "Conectando a Polygon.io..."
+    'connected'  → "● Polygon.io · En vivo" (verde)
+    'mock'       → "⚠ Modo demo — datos simulados" (ámbar)
+    'error'      → "✕ Error de conexión — [ver detalles]" (rojo)
+
+  Nunca mostrar "Connecting..." y "MOCK" al mismo tiempo.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  UX #3 — Tabs no implementadas sin indicación visual
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PROBLEMA:
+  La tab "Backtest" está visible y clickeable pero no tiene
+  funcionalidad. Otras tabs (Alertas, Portafolio) pueden
+  estar en el mismo estado. Mostrar tabs vacías genera
+  frustración y desconfianza en el producto.
+
+FIX — Marcar tabs pendientes:
+
+  const TABS = [
+    { id: 'analysis',   label: 'Análisis',   ready: true },
+    { id: 'signals',    label: 'Señales',    ready: true },
+    { id: 'backtest',   label: 'Backtest',   ready: false },
+    { id: 'journal',    label: 'Bitácora',   ready: true },
+    { id: 'broker',     label: 'Broker',     ready: true },
+    { id: 'portfolio',  label: 'Portafolio', ready: false },
+    { id: 'alerts',     label: 'Alertas',    ready: false },
+  ];
+
+  Para tabs con ready: false, mostrar badge "Próximamente"
+  y deshabilitar el click (o mostrar un mensaje al abrir).
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  UX #4 — Sin favicon ni imagen OG
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PROBLEMA:
+  Sin favicon, la pestaña del navegador muestra el icono
+  genérico de Vercel/Next.js. Sin imagen OG, los links
+  compartidos en Slack, WhatsApp o redes sociales no
+  tienen preview visual.
+
+FIX — Agregar en src/app/layout.tsx:
+
+  export const metadata: Metadata = {
+    title: 'TradeIQ — Análisis de Trading con IA',
+    description: 'Plataforma semi-automática de análisis multivector',
+    icons: {
+      icon: '/favicon.ico',          // public/favicon.ico
+      apple: '/apple-touch-icon.png',
+    },
+    openGraph: {
+      title: 'TradeIQ',
+      description: 'Análisis de trading semi-automático con IA multivector',
+      url: 'https://trade-iq-six.vercel.app',
+      siteName: 'TradeIQ',
+      images: [{ url: '/og-image.png', width: 1200, height: 630 }],
+      type: 'website',
+    },
+  };
+
+  Archivos a crear en /public:
+    favicon.ico         (32x32 o multi-size)
+    apple-touch-icon.png (180x180)
+    og-image.png        (1200x630 — captura o diseño del dashboard)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  CONFIGURACIÓN DE VARIABLES EN VERCEL (RESUMEN)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Ir a: vercel.com → TradeIQ → Settings → Environment Variables
+
+  Variable              Entorno       Valor
+  ─────────────────────────────────────────────────────
+  NEXTAUTH_SECRET       Production    openssl rand -hex 32
+  NEXTAUTH_URL          Production    https://trade-iq-six.vercel.app
+  POLYGON_API_KEY       Production    tu_key_de_polygon.io
+  ALPACA_API_KEY        Production    tu_key_de_alpaca
+  ALPACA_API_SECRET     Production    tu_secret_de_alpaca
+  ENCRYPTION_KEY        Production    openssl rand -hex 32
+  DATABASE_URL          Production    (si migras a Postgres: connection string)
+
+  Después de agregar variables: hacer Redeploy desde el dashboard
+  de Vercel para que tomen efecto.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ORDEN DE IMPLEMENTACIÓN RECOMENDADO (RUNTIME)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  HOY (30-60 min — sin tocar código):
+    1. Configurar variables de entorno en Vercel
+       → Esto solo ya arregla el gráfico, el badge MOCK,
+         y potencialmente el broker si tienes keys de Alpaca.
+    2. Hacer Redeploy
+
+  Día 1 (2-3h):
+    3. Proteger ruta "/" con redirect a /login
+    4. Banner de modo demo prominente
+    5. Timeout y error state en el gráfico
+
+  Día 2 (3-4h):
+    6. Estado vacío accionable en watchlist
+    7. Diagnóstico en panel de broker
+    8. Arreglar gráfico duplicado
+
+  Día 3 (2h):
+    9. Deshabilitar tabs no implementadas (Backtest, etc.)
+   10. Marcar vector Order Flow como "Próximamente"
+   11. Unificar estados de conexión contradictorios
+
+  Semana 2:
+   12. Flujo de onboarding de 3 pasos
+   13. Favicon + imagen OG
+   14. Sincronizar README con los 7 vectores reales
+
+========================================================
+  COMPARATIVA: CÓDIGO vs PRODUCCIÓN
+========================================================
+
+  Categoría            Código    Producción   Delta
+  ─────────────────────────────────────────────────
+  Seguridad            5.5       2.0          -3.5  ← auth no activa
+  Funcionalidad        5.0       2.0          -3.0  ← sin API keys
+  Arquitectura         7.5       N/A          (solo código)
+  UX / Onboarding      N/A       3.0          nueva dimensión
+  Estabilidad          N/A       4.0          no crashea, pero inútil
+  Datos reales         N/A       1.0          todo mock
+
+  El gap entre código y producción se explica principalmente
+  por variables de entorno no configuradas en Vercel.
+  Muchos fixes son de configuración, no de código.
+
+========================================================
+  FIN DEL DOCUMENTO
+  TradeIQ Runtime Audit v1.0 — 2026-05-17
+========================================================

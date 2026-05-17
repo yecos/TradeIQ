@@ -4,6 +4,7 @@ import { MockProvider } from './mock-provider';
 import { PolygonProvider } from './polygon-provider';
 import { BinanceProvider, isCryptoSymbol } from './binance-provider';
 import { CoinGeckoProvider } from './coingecko-provider';
+import { FinnhubProvider } from './finnhub-provider';
 import { DataCache } from './market-data-interface';
 import { validateCandleArray, cleanCandleData, validateQuote, isPriceSane, isCandleDataStale } from './validator';
 
@@ -14,7 +15,11 @@ import { validateCandleArray, cleanCandleData, validateQuote, isPriceSane, isCan
  * - Crypto symbols → CoinGecko (primary, works everywhere including US)
  *                    → Binance (secondary, may be geo-blocked from US)
  *                    → Mock (fallback)
- * - Stock/ETF symbols → PolygonProvider (if API key set) or MockProvider
+ * - Stock/ETF symbols → Finnhub (if API key set, covers stocks + forex)
+ *                      → PolygonProvider (if API key set, stocks only)
+ *                      → MockProvider
+ * - Forex symbols → Finnhub (if API key set)
+ *                 → MockProvider
  * - Fallback: MockProvider for any symbol that fails
  *
  * CRITICAL: Crypto and stock fetches run IN PARALLEL to prevent
@@ -47,9 +52,11 @@ export class SmartProvider implements MarketDataProvider {
   readonly name = 'smart';
   private coingecko: CoinGeckoProvider;
   private binance: BinanceProvider;
+  private finnhub: FinnhubProvider | null = null;
   private polygon: PolygonProvider | null = null;
   private mock: MockProvider;
   private hasPolygonKey: boolean;
+  private hasFinnhubKey: boolean;
 
   // Cache for crypto quotes to avoid hitting APIs on every request
   private cryptoQuoteCache = new Map<string, { data: Quote; timestamp: number }>();
@@ -60,15 +67,24 @@ export class SmartProvider implements MarketDataProvider {
   private mockSymbols = new Set<string>();
   private staleSymbols = new Set<string>();
 
-  constructor(polygonApiKey?: string) {
+  constructor(polygonApiKey?: string, finnhubApiKey?: string) {
     this.coingecko = new CoinGeckoProvider();
     this.binance = new BinanceProvider();
     this.mock = new MockProvider();
     this.hasPolygonKey = Boolean(polygonApiKey && polygonApiKey.length > 0);
+    this.hasFinnhubKey = Boolean(finnhubApiKey && finnhubApiKey.length > 0);
 
     if (this.hasPolygonKey && polygonApiKey) {
       const cache = new DataCache(60_000);
       this.polygon = new PolygonProvider(polygonApiKey, cache);
+    }
+
+    if (this.hasFinnhubKey && finnhubApiKey) {
+      try {
+        this.finnhub = new FinnhubProvider(finnhubApiKey);
+      } catch {
+        console.warn('[TradeIQ] Failed to initialize Finnhub provider');
+      }
     }
   }
 
@@ -85,25 +101,12 @@ export class SmartProvider implements MarketDataProvider {
       return this.validateAndCleanCandles(candles, symbol, interval);
     }
 
-    // Stocks: Polygon or Mock
-    const provider = this.getStockProvider();
-    try {
-      const result = await withTimeout(
-        provider.getCandles(symbol, days, interval),
-        PROVIDER_TIMEOUT,
-        `${provider.name}.getCandles(${symbol})`
-      );
-      const candles = result ?? await this.mock.getCandles(symbol, days, interval);
-      // Track if using mock data
-      if (!result) this.mockSymbols.add(symbol);
-      else this.mockSymbols.delete(symbol);
-      return this.validateAndCleanCandles(candles, symbol, interval);
-    } catch {
-      console.warn(`[TradeIQ] ${provider.name} failed for getCandles(${symbol}), using mock`);
-      this.mockSymbols.add(symbol);
-      const candles = await this.mock.getCandles(symbol, days, interval);
-      return this.validateAndCleanCandles(candles, symbol, interval);
-    }
+    // Stocks/Forex: Finnhub → Polygon → Mock
+    const providers = this.getStockProviders();
+    const candles = await this.getCandlesWithFallback(symbol, days, interval, providers);
+    if (providers[0] === this.mock) this.mockSymbols.add(symbol);
+    else this.mockSymbols.delete(symbol);
+    return this.validateAndCleanCandles(candles, symbol, interval);
   }
 
   async getQuote(symbol: string): Promise<Quote> {
@@ -112,24 +115,27 @@ export class SmartProvider implements MarketDataProvider {
       return this.validateAndMarkQuote(quote);
     }
 
-    // Stocks: Polygon or Mock
-    const provider = this.getStockProvider();
-    try {
-      const result = await withTimeout(
-        provider.getQuote(symbol),
-        PROVIDER_TIMEOUT,
-        `${provider.name}.getQuote(${symbol})`
-      );
-      const quote = result ?? await this.mock.getQuote(symbol);
-      if (!result) this.mockSymbols.add(symbol);
-      else this.mockSymbols.delete(symbol);
-      return this.validateAndMarkQuote(quote, !result);
-    } catch {
-      console.warn(`[TradeIQ] ${provider.name} failed for getQuote(${symbol}), using mock`);
-      this.mockSymbols.add(symbol);
-      const quote = await this.mock.getQuote(symbol);
-      return this.validateAndMarkQuote(quote, true);
+    // Stocks/Forex: Finnhub → Polygon → Mock
+    const stockProviders = this.getStockProviders();
+    for (const provider of stockProviders) {
+      try {
+        const result = await withTimeout(
+          provider.getQuote(symbol),
+          PROVIDER_TIMEOUT,
+          `${provider.name}.getQuote(${symbol})`
+        );
+        if (result) {
+          this.mockSymbols.delete(symbol);
+          return this.validateAndMarkQuote(result, false);
+        }
+      } catch {
+        // Try next provider
+      }
     }
+    // All stock providers failed — use mock
+    this.mockSymbols.add(symbol);
+    const quote = await this.mock.getQuote(symbol);
+    return this.validateAndMarkQuote(quote, true);
   }
 
   async getMultipleQuotes(symbols: string[]): Promise<Quote[]> {
@@ -247,6 +253,7 @@ export class SmartProvider implements MarketDataProvider {
   getActiveProviders(): string[] {
     const providers = ['coingecko']; // Primary crypto (works everywhere)
     providers.push('binance'); // Secondary crypto
+    if (this.hasFinnhubKey) providers.push('finnhub');
     if (this.hasPolygonKey) providers.push('polygon');
     providers.push('mock'); // Always available as fallback
     return providers;
@@ -259,8 +266,8 @@ export class SmartProvider implements MarketDataProvider {
   getDataQualityReport(): DataQualityReport {
     const warnings: string[] = [];
 
-    if (!this.hasPolygonKey) {
-      warnings.push('Stock data is simulated (no POLYGON_API_KEY). Do NOT trade stocks based on this data.');
+    if (!this.hasPolygonKey && !this.hasFinnhubKey) {
+      warnings.push('Stock data is simulated (no POLYGON_API_KEY or FINNHUB_API_KEY). Do NOT trade stocks based on this data.');
     }
     if (this.mockSymbols.size > 0) {
       warnings.push(`${this.mockSymbols.size} symbol(s) using mock data: ${[...this.mockSymbols].slice(0, 5).join(', ')}`);
@@ -293,6 +300,20 @@ export class SmartProvider implements MarketDataProvider {
    */
   hasPolygon(): boolean {
     return this.hasPolygonKey;
+  }
+
+  /**
+   * Check if Finnhub (stock/forex data) is available.
+   */
+  hasFinnhub(): boolean {
+    return this.hasFinnhubKey;
+  }
+
+  /**
+   * Get the Finnhub provider instance for news/sentiment/calendar.
+   */
+  getFinnhub(): FinnhubProvider | null {
+    return this.finnhub;
   }
 
   // --- Private helpers ---
@@ -574,8 +595,16 @@ export class SmartProvider implements MarketDataProvider {
     return this.mock.getCandles(symbol, days, interval);
   }
 
+  private getStockProviders(): MarketDataProvider[] {
+    const providers: MarketDataProvider[] = [];
+    if (this.finnhub) providers.push(this.finnhub);
+    if (this.polygon) providers.push(this.polygon);
+    providers.push(this.mock);
+    return providers;
+  }
+
   private getStockProvider(): MarketDataProvider {
-    return this.polygon || this.mock;
+    return this.finnhub || this.polygon || this.mock;
   }
 
   /**

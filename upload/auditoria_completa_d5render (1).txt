@@ -1,0 +1,1118 @@
+================================================================================
+                   AUDITORÍA COMPLETA - ACADEMY TECH (D5RENDER)
+================================================================================
+Fecha: Mayo 2026
+Aplicación: https://d5render.vercel.app/
+Repositorio: https://github.com/yecos/d5render
+Stack: Next.js + TypeScript + Tailwind CSS + Prisma
+
+================================================================================
+RESUMEN EJECUTIVO
+================================================================================
+
+Academy Tech es una plataforma de aprendizaje en línea especializada en 
+Arquitectura, Programación, Ciberseguridad e Inteligencia Artificial. 
+La aplicación está en fase temprana con estructura base implementada pero 
+con múltiples oportunidades de mejora en funcionalidad, performance, 
+experiencia de usuario y escalabilidad.
+
+Estado Actual: MVP en construcción
+Crítico: Datos dummy (0+ cursos, 0+ estudiantes)
+Prioridad: URGENTE
+
+================================================================================
+SECCIÓN 1: ANÁLISIS TÉCNICO
+================================================================================
+
+1.1 STACK TECNOLÓGICO ✓ BIEN
+─────────────────────────────
+✓ Next.js 15+: Framework moderno, buena opción
+✓ TypeScript: Type safety implementado (98.1% del código)
+✓ Tailwind CSS: Sistema de diseño escalable
+✓ Prisma ORM: Abstracción de BD moderna
+✓ Bun: Package manager rápido y eficiente
+✓ ESLint: Linting configurado
+
+Puntuación: 8/10
+
+1.2 ESTRUCTURA DE PROYECTO
+─────────────────────────────
+Directorios identificados:
+├── src/             (componentes, páginas, lógica)
+├── prisma/          (esquema de BD)
+├── public/          (assets estáticos)
+├── scripts/         (automatización)
+├── upload/          (uploads de usuarios)
+├── agent-ctx/       (posible AI context?)
+
+⚠️ PROBLEMAS DETECTADOS:
+- No hay README.md visible (documentación crítica falta)
+- No hay contribuciones documentadas
+- Estructura de carpetas podría ser más clara
+- Falta separación clara entre componentes, hooks, servicios
+
+Puntuación: 5/10
+
+1.3 CONFIGURACIÓN Y SETUP
+─────────────────────────────
+✓ TypeScript configurado
+✓ ESLint configurado
+✓ PostCSS + Tailwind
+✓ Components.json (probablemente shadcn/ui)
+✓ Next.config.ts
+
+⚠️ PROBLEMAS:
+- No visible CI/CD pipeline (.github/workflows falta)
+- No hay secrets.example o .env.example
+- Sin tests (no hay jest, vitest, testing-library)
+- Sin documentación de deployment
+
+Puntuación: 4/10
+
+1.4 SEGURIDAD
+─────────────────────────────
+🔴 CRÍTICO:
+- No hay evidencia de autenticación (¿Login/Signup visible en UI?)
+- No hay verificación de roles/permisos mostrada
+- Ruta /upload presente - ¿cómo se validan uploads?
+- Sin HTTPS enforcement documentado
+- Falta rate limiting en APIs
+- Sin validación de CORS visible
+
+⚠️ ALTO:
+- No hay sanitización visible de inputs
+- Sin proteción CSRF
+- Sin CSP headers configurados
+- Prisma - ¿se protege contra SQL injection?
+
+Puntuación: 2/10 - ⚠️ REQUIERE ATENCIÓN INMEDIATA
+
+================================================================================
+SECCIÓN 2: ANÁLISIS FUNCIONAL
+================================================================================
+
+2.1 FUNCIONALIDADES IMPLEMENTADAS
+──────────────────────────────────
+✓ Navegación principal
+✓ Página de inicio
+✓ Sistema de categorías (visible en HTML)
+✓ Estructura de rutas:
+  - /inicio (home)
+  - /perfil (mis cursos)
+  - /buscar (búsqueda)
+  - /glosario (diccionario técnico)
+  - /marcadores (guardados)
+  - /atajos (shortcuts/ayuda)
+  - /comparar (herramienta de comparación)
+  - /soluciones (solucionario)
+  - /logros (achievements)
+  - /certificado (certificados)
+
+✓ Estructura base de base de datos (Prisma schema)
+
+Puntuación: 6/10
+
+2.2 FUNCIONALIDADES NO IMPLEMENTADAS / INCOMPLETAS
+────────────────────────────────────────────────────
+🔴 CRÍTICO:
+- CERO DATOS EN PRODUCCIÓN (0 cursos, 0 estudiantes, 0 temas)
+- No hay cursos reales en la BD
+- Login/autenticación no implementada
+- Registro de usuarios no visible
+- Sistema de pago/subscripciones falta
+
+🔴 ALTO:
+- Visualización de cursos incompleta
+- Sistema de evaluaciones/quizzes sin implementar
+- Seguimiento de progreso no funcional
+- Certificados no generables
+- No hay reproductor de videos integrado
+- Sistema de comentarios/comunidad falta
+
+⚠️ MEDIO:
+- Búsqueda sin motor de búsqueda completo
+- Filtrado de cursos básico
+- Sistema de favoritos sin persistencia clara
+- Notificaciones no implementadas
+
+Puntuación: 1/10
+
+2.3 EXPERIENCIA DE USUARIO (UX)
+────────────────────────────────
+✓ POSITIVOS:
+- Diseño limpio y moderno
+- Paleta de colores consistente (dark mode)
+- Navegación intuitiva
+- Responsive probablemente (Tailwind)
+- Meta tags SEO presentes
+
+⚠️ PROBLEMAS:
+- Sin información en landing page (0+ de todo)
+- No hay call-to-action claro
+- Sin testimonios o social proof
+- Loading states no visibles
+- Error handling no visible
+- Toast/notificaciones no implementadas
+- No hay onboarding para nuevos usuarios
+
+Puntuación: 4/10
+
+================================================================================
+SECCIÓN 3: ANÁLISIS DE PERFORMANCE
+================================================================================
+
+3.1 VELOCIDAD Y CARGA
+──────────────────────
+Plataforma: Vercel (buena opción)
+Framework: Next.js (optimizado por defecto)
+
+⚠️ ÁREAS A MEJORAR:
+- Image optimization: ¿se usan next/image?
+- Bundle size: sin análisis visible
+- Code splitting: verificar lazy loading
+- Caching headers: revisar
+- Database queries: N+1 problems en Prisma
+
+Puntuación: 5/10
+
+3.2 SEO
+────────
+✓ Meta tags básicos presentes
+✓ Keywords configurados
+✓ OG tags para compartir social
+✓ Título y descripción en meta
+
+⚠️ FALTA:
+- robots.txt
+- sitemap.xml
+- Structured data (JSON-LD)
+- Breadcrumbs
+- Heading hierarchy
+- alt text en imágenes
+
+Puntuación: 5/10
+
+================================================================================
+SECCIÓN 4: ANÁLISIS DE BD (PRISMA)
+================================================================================
+
+4.1 MODELO DE DATOS
+─────────────────────
+⚠️ SIN ACCESO DIRECTO AL SCHEMA
+Basado en estructura del proyecto, se espera:
+- Users (usuarios)
+- Courses (cursos)
+- Lessons (lecciones)
+- Modules (módulos)
+- Enrollments (inscripciones)
+- Progress (progreso)
+- Certificates (certificados)
+
+4.2 PROBLEMAS POTENCIALES
+──────────────────────────
+⚠️ ALTO:
+- Sin migrations documentadas
+- Sin seed script para datos demo
+- ¿Índices en tablas principales?
+- ¿Relaciones cascading bien definidas?
+
+Puntuación: 3/10
+
+================================================================================
+SECCIÓN 5: ANÁLISIS DE DEPLOYMENT
+================================================================================
+
+5.1 DEPLOYMENT ACTUAL
+──────────────────────
+✓ Vercel: Excelente para Next.js
+✓ Dominio: d5render.vercel.app (custom domain?)
+✓ SSL/HTTPS: ✓ Automático en Vercel
+✓ Escalabilidad: ✓ Serverless functions
+
+⚠️ PROBLEMAS:
+- Sin documentación de deployment
+- ¿Variables de entorno configuradas?
+- ¿Database connection string seguro?
+- Sin backup strategy visible
+- Sin disaster recovery plan
+
+Puntuación: 6/10
+
+5.2 CI/CD PIPELINE
+───────────────────
+🔴 CRÍTICO - NO IMPLEMENTADO:
+- Sin GitHub Actions
+- Sin tests automatizados
+- Sin linting check en PRs
+- Sin preview deployments
+- Sin rollback strategy
+
+Puntuación: 1/10
+
+================================================================================
+SECCIÓN 6: ANÁLISIS DE CÓDIGO
+================================================================================
+
+6.1 CALIDAD DE CÓDIGO
+──────────────────────
+✓ TypeScript (98.1%) - Muy bien
+✓ ESLint configurado
+
+⚠️ ÁREAS DE MEJORA:
+- Sin tests (0% coverage presumido)
+- Sin documentación en código
+- Sin JSDoc comments
+- Sin storybook para componentes
+- Falta análisis de complexity
+
+Puntuación: 4/10
+
+6.2 CONVENCIONES Y ESTÁNDARES
+──────────────────────────────
+⚠️ SIN EVIDENCIA DE:
+- Component naming conventions
+- Folder structure conventions
+- Git commit message standards
+- Code review process
+- Prettier setup
+- Husky/pre-commit hooks
+
+Puntuación: 2/10
+
+================================================================================
+SECCIÓN 7: ANÁLISIS DE MONITOREO Y LOGGING
+================================================================================
+
+7.1 OBSERVABILIDAD
+────────────────────
+🔴 CRÍTICO - NO IMPLEMENTADO:
+- Sin logging system
+- Sin error tracking (Sentry?)
+- Sin analytics (Google Analytics? Vercel Analytics?)
+- Sin uptime monitoring
+- Sin performance monitoring
+
+Puntuación: 0/10
+
+================================================================================
+SECCIÓN 8: ANÁLISIS DE ESCALABILIDAD
+================================================================================
+
+8.1 ARCHITEKTURA
+─────────────────
+✓ Serverless en Vercel - escalable
+✓ Prisma + Database - escalable (con índices)
+
+⚠️ CUELLOS DE BOTELLA POTENCIALES:
+- Sin caching (Redis?)
+- Sin CDN configurado
+- Sin lazy loading de componentes
+- Sin virtual scrolling para listas largas
+- Sin paginación
+
+Puntuación: 4/10
+
+================================================================================
+SECCIÓN 9: ANÁLISIS GENERAL PUNTUACIÓN FINAL
+================================================================================
+
+Seguridad:                 2/10  🔴 CRÍTICO
+Funcionalidad:             1/10  🔴 CRÍTICO
+Performance:               5/10  ⚠️ REQUIERE MEJORA
+UX/UI:                     4/10  ⚠️ REQUIERE MEJORA
+Calidad de Código:         4/10  ⚠️ REQUIERE MEJORA
+Arquitectura:              5/10  ⚠️ REQUIERE MEJORA
+DevOps/Deployment:         3/10  🔴 CRÍTICO
+Testing:                   0/10  🔴 CRÍTICO
+Documentación:             1/10  🔴 CRÍTICO
+
+PUNTUACIÓN GENERAL: 3.2/10 - 🔴 PROYECTO EN FASE MUY TEMPRANA
+
+================================================================================
+SECCIÓN 10: PROBLEMAS IDENTIFICADOS POR CATEGORÍA
+================================================================================
+
+CRÍTICOS (ARREGLAR YA) 🔴
+════════════════════════════════════════════════════════════════════════════
+
+1. SEGURIDAD
+   - [ ] Sin autenticación implementada
+   - [ ] Sin control de acceso/roles
+   - [ ] Endpoint /upload sin validación visible
+   - [ ] Sin protección CSRF
+   - [ ] Sin rate limiting
+   - [ ] Sin CORS configurado
+
+2. DATOS Y FUNCIONALIDAD
+   - [ ] CERO datos en producción (0 cursos)
+   - [ ] No hay API de cursos funcional
+   - [ ] Sin sistema de inscripción
+   - [ ] Sin progreso de usuario guardado
+   - [ ] Sin certificados generables
+
+3. TESTING Y CALIDAD
+   - [ ] Cero tests implementados
+   - [ ] Sin CI/CD pipeline
+   - [ ] Sin linting en PRs
+   - [ ] Sin type checking en deploy
+
+4. DOCUMENTACIÓN
+   - [ ] Sin README.md
+   - [ ] Sin API documentation
+   - [ ] Sin setup guide
+   - [ ] Sin architecture documentation
+
+
+ALTOS (ARREGLAR PRONTO) ⚠️
+════════════════════════════════════════════════════════════════════════════
+
+5. PERFORMANCE
+   - [ ] Sin image optimization implementada
+   - [ ] Sin bundle analysis
+   - [ ] Sin lazy loading de módulos
+   - [ ] Sin caching strategy
+
+6. OBSERVABILIDAD
+   - [ ] Sin logging
+   - [ ] Sin error tracking
+   - [ ] Sin analytics
+   - [ ] Sin monitoring
+
+7. UX
+   - [ ] Sin loading states
+   - [ ] Sin error messages claros
+   - [ ] Sin toasts/notifications
+   - [ ] Sin validación de formularios visible
+
+8. BASE DE DATOS
+   - [ ] Sin migrations versionadas
+   - [ ] Sin seed data
+   - [ ] Sin índices optimizados
+   - [ ] Sin query optimization
+
+
+MEDIOS (MEJORAR DESPUÉS) 🟡
+════════════════════════════════════════════════════════════════════════════
+
+9. CÓDIGO
+   - [ ] Sin tests unitarios
+   - [ ] Sin componentes documentados (Storybook)
+   - [ ] Sin consistent naming conventions
+   - [ ] Sin pre-commit hooks
+
+10. DEVOPS
+    - [ ] Sin environment configuration clara
+    - [ ] Sin secrets management
+    - [ ] Sin backup strategy
+    - [ ] Sin disaster recovery
+
+11. SEO
+    - [ ] Sin sitemap.xml
+    - [ ] Sin robots.txt
+    - [ ] Sin structured data
+    - [ ] Sin breadcrumbs
+
+
+================================================================================
+SECCIÓN 11: PLAN DE ACCIÓN DETALLADO - FASE 1 (SEMANA 1-2)
+================================================================================
+Objetivo: Hacer el MVP funcional y seguro
+
+SEMANA 1 - Seguridad y Autenticación
+─────────────────────────────────────
+
+[ ] 1.1 Implementar autenticación
+    - Opción A: NextAuth.js (recomendado)
+    - Opción B: Clerk
+    - Opción C: Supabase Auth
+    Ruta: /api/auth/[...nextauth] o /api/auth/*
+    
+[ ] 1.2 Crear modelo de Usuario en Prisma
+    - id, email, name, password_hash, role, created_at, updated_at
+    - Índice en email (único)
+    
+[ ] 1.3 Implementar Login/Signup
+    - Página /auth/login
+    - Página /auth/signup
+    - Validación de input
+    - Password hashing (bcryptjs)
+    - Middleware de protección de rutas
+
+[ ] 1.4 Agregar validación de CSRF
+    - Usar middleware de Next.js
+    - Generar tokens CSRF
+
+[ ] 1.5 Implementar rate limiting
+    - npm install express-rate-limit
+    - Aplicar a /api/auth/login
+    - Max 5 intentos por IP en 15 minutos
+
+[ ] 1.6 Configurar CORS
+    - next.config.ts
+    - Headers en middleware
+
+SEMANA 2 - Datos y API Funcional
+─────────────────────────────────
+
+[ ] 2.1 Actualizar schema Prisma
+    - User (email login)
+    - Course (nombre, descripción, categoría, instructor)
+    - Module (lecciones dentro de curso)
+    - Lesson (contenido, videos, texto)
+    - Enrollment (usuario + curso)
+    - Progress (usuario + lesson + completado)
+
+[ ] 2.2 Crear migrations de BD
+    npx prisma migrate dev --name init_schema
+
+[ ] 2.3 Crear seed data
+    - scripts/seed.ts
+    - 5-10 cursos de demo
+    - 1-2 instructores de demo
+    - Ejecutar: npx prisma db seed
+
+[ ] 2.4 Implementar API endpoints básicos
+    GET    /api/courses          (listar cursos)
+    GET    /api/courses/:id      (detalles curso)
+    GET    /api/courses/:id/lessons (lecciones)
+    POST   /api/courses/:id/enroll (inscribirse)
+    GET    /api/user/progress    (progreso)
+    POST   /api/lessons/:id/complete (marcar completado)
+
+[ ] 2.5 Proteger endpoints con autenticación
+    - Crear middleware: middleware/auth.ts
+    - Verificar JWT/session en cada endpoint
+
+[ ] 2.6 Validación de input
+    - npm install zod
+    - Crear esquemas de validación para cada endpoint
+
+PRIORIDADES SEMANA 1-2:
+1. Auth + Login (sin esto no hay experiencia)
+2. Datos en BD (sin cursos, app muestra "0+")
+3. API funcional (sin API, no hay datos en frontend)
+4. Protección básica (sin auth, sin validación, no es seguro)
+
+
+================================================================================
+SECCIÓN 12: PLAN DE ACCIÓN DETALLADO - FASE 2 (SEMANA 3-4)
+================================================================================
+Objetivo: Mejorar UX y agregar testing
+
+SEMANA 3 - Frontend y UX
+────────────────────────
+
+[ ] 3.1 Crear página de listado de cursos
+    - Integrar API /api/courses
+    - Mostrar tarjetas de cursos reales
+    - Filtrar por categoría
+    - Search functionality
+    - Pagination (10-20 por página)
+
+[ ] 3.2 Crear página de detalles del curso
+    - Mostrar descripción, instructor, duración
+    - Botón "Inscribirse" si no inscrito
+    - Lista de módulos/lecciones
+    - Botón "Continuar" si ya inscrito
+
+[ ] 3.3 Crear visor de lecciones
+    - /cursos/[id]/lecciones/[lessonId]
+    - Reproductor de video
+    - Contenido de texto
+    - Botón "Marcar como completado"
+    - Barra de progreso
+
+[ ] 3.4 Agregar loading states
+    - Skeleton loaders
+    - Loading spinners
+    - Transitions suaves
+
+[ ] 3.5 Implementar error handling
+    - Error boundaries en React
+    - Páginas 404, 500
+    - Toast notifications (react-hot-toast)
+    - User-friendly error messages
+
+[ ] 3.6 Mejorar validación de formularios
+    - React Hook Form + Zod
+    - Validación en tiempo real
+    - Error messages claros
+
+SEMANA 4 - Testing e Integración Continua
+──────────────────────────────────────────
+
+[ ] 4.1 Configurar testing
+    npm install -D jest @testing-library/react @testing-library/jest-dom
+    
+    Crear:
+    - jest.config.ts
+    - tests/ folder structure
+    - __tests__/ en cada componente
+
+[ ] 4.2 Escribir tests unitarios
+    - Tests para componentes principales
+    - Tests para funciones de utilidad
+    - Tests para hooks custom
+    - Objetivo: 30%+ coverage
+
+[ ] 4.3 Escribir tests de integración
+    - Tests para flujos principales
+    - Login → Inscribirse → Ver curso → Completar lección
+
+[ ] 4.4 Configurar GitHub Actions
+    Crear .github/workflows/ci.yml
+    - Run tests on push
+    - Run linting
+    - Build check
+    - Deploy preview (Vercel integrado)
+
+[ ] 4.5 Configurar pre-commit hooks
+    npm install -D husky lint-staged
+    npx husky install
+    
+    Checks:
+    - prettier (format)
+    - eslint
+    - type check
+
+[ ] 4.6 Setup de Prettier
+    Crear .prettierrc
+    Configurar en ESLint
+
+PRIORIDADES SEMANA 3-4:
+1. Funcionalidad de cursos (users ver contenido real)
+2. Error handling (experiencia robusta)
+3. Testing básico (confianza en código)
+4. CI/CD (prevenir regresiones)
+
+
+================================================================================
+SECCIÓN 13: PLAN DE ACCIÓN DETALLADO - FASE 3 (SEMANA 5-6)
+================================================================================
+Objetivo: Performance, Analytics, Escalabilidad
+
+SEMANA 5 - Performance y SEO
+─────────────────────────────
+
+[ ] 5.1 Image Optimization
+    - Reemplazar <img> con <Image> de next/image
+    - Configurar sizes y fill
+    - Usar WebP con fallback
+    - Optimizar imágenes (TinyPNG, ImageOptim)
+
+[ ] 5.2 Code Splitting y Lazy Loading
+    npm install next-dynamic
+    - Lazy load componentes pesados
+    - Dynamic imports para rutas
+    - Verificar con next/bundle-analyzer
+
+[ ] 5.3 Caching Strategy
+    - Cache headers en Vercel
+    - next.config.ts:
+      {
+        headers: async () => [{
+          source: '/api/(.*)',
+          headers: [{ key: 'Cache-Control', value: 'max-age=0' }]
+        }]
+      }
+
+[ ] 5.4 Database Query Optimization
+    - Analizar queries con Prisma debugger
+    - Agregar select {} para no traer campos innecesarios
+    - Usar include {} para eager loading
+    - Crear índices necesarios
+
+[ ] 5.5 SEO Improvements
+    - Crear sitemap.xml (next-sitemap)
+    - Crear robots.txt
+    - Agregar structured data (JSON-LD)
+    - Breadcrumbs en páginas de curso
+    - Meta descriptions dinámicas
+    - Open Graph images
+
+[ ] 5.6 Monitoreo de Performance
+    - Vercel Analytics (built-in)
+    - Google Analytics 4
+    - Segment analytics (opcional)
+    - Setup: crear /lib/analytics.ts
+
+SEMANA 6 - Observabilidad y Monitoreo
+──────────────────────────────────────
+
+[ ] 6.1 Error Tracking
+    npm install @sentry/nextjs
+    
+    Configurar:
+    - Sentry.io account
+    - sentry.client.config.ts
+    - sentry.server.config.ts
+    - sentry.edge.config.ts
+    - next.config.ts integration
+
+[ ] 6.2 Logging
+    npm install pino
+    
+    Crear:
+    - /lib/logger.ts
+    - Log requests/responses en API routes
+    - Log user actions importantes
+    - Log errors con stack traces
+
+[ ] 6.3 Database Monitoring
+    - Prisma Cloud (si existe)
+    - O usar logs propios
+    - Alertar sobre queries lentas
+
+[ ] 6.4 Uptime Monitoring
+    - Usar Better Stack, Uptime Robot, o Pingdom
+    - Monitor healthcheck endpoint
+    - Create GET /api/health endpoint
+
+[ ] 6.5 Setup de Alertas
+    - Email alerts para errores críticos
+    - Slack integration (opcional)
+    - Alert thresholds (p.ej: 50+ errores/hora)
+
+PRIORIDADES SEMANA 5-6:
+1. Performance (usuarios ven mejora)
+2. Observabilidad (saber qué falla)
+3. Monitoreo (proactividad)
+4. Logging (debugging en prod)
+
+
+================================================================================
+SECCIÓN 14: ROADMAP DESPUÉS DE FASE 3 (POST-MVP)
+================================================================================
+
+Una vez completadas las 3 fases iniciales (Seguridad, UX, Performance),
+el siguiente orden de prioridades sería:
+
+FASE 4 - FEATURES PRINCIPALES (SEMANA 7-12)
+═════════════════════════════════════════════
+
+1. SISTEMA DE EVALUACIONES Y QUIZZES
+   - Crear modelos: Quiz, Question, Answer
+   - Implementar page: /cursos/[id]/quiz
+   - Calificación automática
+   - Mostrar resultados
+   - Retomar evaluación si falla
+
+2. SISTEMA DE CERTIFICADOS
+   - Generar PDF al completar curso
+   - Usar librería: jspdf, html2pdf
+   - Diseño profesional
+   - Verificación online de certificado
+   - Compartir en LinkedIn
+
+3. SISTEMA DE LOGROS
+   - Crear modelos: Achievement, UserAchievement
+   - Achievements automáticos:
+     * "Primer curso completado"
+     * "Racha de 7 días"
+     * "5 cursos completados"
+     * "Expert en Programación"
+   - Badges visuales
+   - Share logros en social
+
+4. GAMIFICACIÓN
+   - Sistema de puntos (XP)
+   - Leaderboard de usuarios
+   - Niveles (Novice, Intermediate, Expert, Master)
+   - Multiplicador de XP por racha
+   - Badges por logros
+
+5. COMUNIDAD Y INTERACCIÓN
+   - Foro de cursos
+   - Comentarios en lecciones
+   - Sistema de Q&A
+   - Ratings de cursos
+   - Menciones @usuario
+   - Notificaciones de respuestas
+
+6. FUNCIONALIDADES AVANZADAS
+   - Descargar contenido (offline)
+   - Subtítulos en videos
+   - Velocidad de reproducción
+   - Notas y resaltados
+   - Exportar progreso (PDF)
+   - Transferir cursos entre cuentas
+
+FASE 5 - INSTRUCTOR TOOLS (SEMANA 13-18)
+════════════════════════════════════════════
+
+1. DASHBOARD INSTRUCTOR
+   - /instructor/dashboard
+   - Estadísticas de estudiantes
+   - Métricas de engagement
+   - Ingresos/pagos
+
+2. CREADOR DE CURSOS
+   - Drag & drop builder
+   - Subidor de videos
+   - Editor de lecciones WYSIWYG
+   - Gestor de recursos
+   - Preview de cursos
+
+3. ADMINISTRACIÓN DE ESTUDIANTES
+   - Lista de inscritos
+   - Tracking de progreso
+   - Enviar mensajes
+   - Generar reportes
+
+4. EVALUACIÓN
+   - Crear quizzes
+   - Crear assignments
+   - Calificar manualmente
+   - Dar feedback
+
+5. MONETIZACIÓN
+   - Precios de cursos
+   - Descuentos
+   - Coupons
+   - Revenue analytics
+
+FASE 6 - ESCALA Y NEGOCIO (SEMANA 19-24)
+═══════════════════════════════════════════
+
+1. INTEGRACIÓN DE PAGOS
+   - Stripe integration
+   - Pasarela local (p.ej: Mercado Pago si es LATAM)
+   - Suscripciones mensuales
+   - Compra de cursos individuales
+   - Webhooks para confirmación
+
+2. MARKETING
+   - Landing page mejorada
+   - SEO completo
+   - Blog integrado
+   - Email marketing (Mailchimp, Brevo)
+   - Social media integration
+   - Referral program
+
+3. ANALYTICS AVANZADO
+   - Funnel de conversión
+   - Cohort analysis
+   - Retention metrics
+   - LTV (lifetime value)
+   - CAC (customer acquisition cost)
+
+4. ADMINISTRACIÓN
+   - Admin panel completo
+   - User management
+   - Course moderation
+   - Content policies
+   - Reports y analytics
+
+5. MOBILE APP
+   - React Native o Flutter
+   - Descargas offline
+   - Push notifications
+   - Better UX móvil
+   - App stores
+
+FASE 7 - INTELIGENCIA ARTIFICIAL (SEMANA 25-30)
+═════════════════════════════════════════════════
+
+1. ASISTENTE IA
+   - Chatbot con OpenAI GPT
+   - Q&A en cursos
+   - Explicaciones personalizadas
+   - Code review IA
+
+2. PERSONALIZACIÓN
+   - Recomendaciones de cursos (ML)
+   - Learning path automático
+   - Ajuste de dificultad
+   - Detección de estilos de aprendizaje
+
+3. GENERACIÓN DE CONTENIDO
+   - Generador de quizzes con IA
+   - Resúmenes automáticos
+   - Transcripción de videos
+   - Generador de assignments
+
+4. ANÁLISIS PREDICTIVO
+   - Predecir estudiantes en riesgo (dropout)
+   - Predecir tópicos de interés
+   - Optimizar orden de lecciones
+   - Predecir duración del aprendizaje
+
+================================================================================
+SECCIÓN 15: ESTRUCTURA DE CARPETAS RECOMENDADA (FINAL)
+================================================================================
+
+d5render/
+├── .github/
+│   └── workflows/
+│       ├── ci.yml
+│       ├── test.yml
+│       └── deploy.yml
+├── src/
+│   ├── app/                    # Next.js App Router
+│   │   ├── (auth)/
+│   │   │   ├── login/
+│   │   │   └── signup/
+│   │   ├── (dashboard)/
+│   │   │   ├── perfil/
+│   │   │   ├── cursos/
+│   │   │   └── logros/
+│   │   ├── (instructor)/
+│   │   │   ├── dashboard/
+│   │   │   └── crear-curso/
+│   │   ├── api/
+│   │   │   ├── auth/
+│   │   │   ├── courses/
+│   │   │   ├── users/
+│   │   │   └── health/
+│   │   ├── layout.tsx
+│   │   └── page.tsx
+│   ├── components/
+│   │   ├── ui/                 # Componentes reutilizables
+│   │   │   ├── Button.tsx
+│   │   │   ├── Card.tsx
+│   │   │   └── Modal.tsx
+│   │   ├── layouts/            # Layouts
+│   │   │   ├── Navbar.tsx
+│   │   │   └── Sidebar.tsx
+│   │   ├── courses/
+│   │   │   ├── CourseCard.tsx
+│   │   │   └── CourseList.tsx
+│   │   └── forms/
+│   │       ├── LoginForm.tsx
+│   │       └── CourseForm.tsx
+│   ├── lib/
+│   │   ├── auth.ts             # Auth utilities
+│   │   ├── db.ts               # Prisma client
+│   │   ├── api.ts              # API utilities
+│   │   ├── logger.ts           # Logging
+│   │   ├── analytics.ts        # Analytics
+│   │   ├── validators.ts       # Zod schemas
+│   │   └── constants.ts
+│   ├── hooks/
+│   │   ├── useAuth.ts
+│   │   ├── useCourse.ts
+│   │   └── useProgress.ts
+│   ├── services/
+│   │   ├── courseService.ts
+│   │   ├── userService.ts
+│   │   └── authService.ts
+│   ├── middleware.ts           # Next.js middleware
+│   ├── types/
+│   │   ├── index.ts
+│   │   └── api.ts
+│   └── styles/
+│       └── globals.css
+├── prisma/
+│   ├── schema.prisma
+│   └── migrations/
+├── scripts/
+│   ├── seed.ts
+│   └── generate-sitemap.ts
+├── tests/
+│   ├── unit/
+│   ├── integration/
+│   └── e2e/
+├── public/
+│   ├── images/
+│   ├── icons/
+│   └── videos/
+├── .env.example
+├── .eslintrc.js
+├── .prettierrc
+├── .husky/
+├── jest.config.js
+├── tsconfig.json
+├── next.config.ts
+├── postcss.config.mjs
+├── tailwind.config.ts
+├── package.json
+├── bun.lock
+├── README.md                  # ⭐ CREAR ESTO
+├── CONTRIBUTING.md
+├── ARCHITECTURE.md
+└── docs/
+    ├── api.md
+    ├── database.md
+    ├── setup.md
+    └── deployment.md
+
+================================================================================
+SECCIÓN 16: CHECKLIST PARA IMPLEMENTACIÓN
+================================================================================
+
+PRE-IMPLEMENTACIÓN
+─────────────────
+[ ] Crear branch 'development' como default branch
+[ ] Proteger 'main' branch (require PR reviews)
+[ ] Setup de Vercel preview deployments
+[ ] Configurar environment variables en Vercel
+
+FASE 1 - SEGURIDAD Y AUTH (1-2 semanas)
+────────────────────────────────────────
+[ ] Elegir solución de auth (NextAuth, Clerk, etc)
+[ ] Implementar login/signup
+[ ] Crear modelos en Prisma
+[ ] Implementar migrations BD
+[ ] Crear seed data
+[ ] Implementar API básica
+[ ] Tests unitarios para auth
+
+FASE 2 - UX Y TESTING (3-4 semanas)
+───────────────────────────────────
+[ ] Frontend para listar cursos
+[ ] Frontend para detalles curso
+[ ] Visor de lecciones
+[ ] Loading states y error handling
+[ ] Tests unitarios e integración
+[ ] CI/CD pipeline
+[ ] Pre-commit hooks
+
+FASE 3 - PERFORMANCE Y OBSERVABILIDAD (5-6 semanas)
+────────────────────────────────────────────────────
+[ ] Image optimization
+[ ] Code splitting
+[ ] Caching strategy
+[ ] Database optimization
+[ ] SEO implementation
+[ ] Error tracking (Sentry)
+[ ] Logging
+[ ] Analytics
+
+POST-MVP (Roadmap)
+──────────────────
+[ ] Quizzes y evaluaciones
+[ ] Sistema de certificados
+[ ] Logros y gamificación
+[ ] Comunidad
+[ ] Instructor tools
+[ ] Pagos y monetización
+[ ] Mobile app
+[ ] IA features
+
+================================================================================
+SECCIÓN 17: DEPENDENCIAS NPM RECOMENDADAS POR FASE
+================================================================================
+
+FASE 1 - SEGURIDAD
+──────────────────
+npm install next-auth@5           # Autenticación
+npm install bcryptjs              # Password hashing
+npm install zod                   # Validación
+npm install express-rate-limit    # Rate limiting
+
+FASE 2 - UX
+───────────
+npm install react-hook-form       # Formularios
+npm install react-hot-toast       # Notifications
+npm install swr                   # Data fetching con cache
+npm install @hookform/resolvers   # Form validation
+
+TESTING
+───────
+npm install -D jest               # Testing framework
+npm install -D @testing-library/react
+npm install -D @testing-library/jest-dom
+npm install -D jest-environment-jsdom
+npm install -D @types/jest
+
+FASE 3 - PERFORMANCE
+────────────────────
+npm install next-image-export-optimizer  # Image optimization
+npm install @sentry/nextjs        # Error tracking
+npm install pino                  # Logging
+npm install pino-pretty           # Logging format
+
+DEV DEPENDENCIES
+────────────────
+npm install -D prettier           # Code formatting
+npm install -D husky              # Git hooks
+npm install -D lint-staged        # Run linters on staged files
+npm install -D next-bundle-analyzer  # Bundle analysis
+npm install -D next-sitemap       # Sitemap generation
+
+================================================================================
+SECCIÓN 18: GUÍA RÁPIDA DE PRIMEROS PASOS
+================================================================================
+
+1. CLONAR Y CONFIGURAR
+   git clone https://github.com/yecos/d5render.git
+   cd d5render
+   bun install  # o npm install
+   cp .env.example .env.local
+   # Editar .env.local con credenciales
+
+2. CONFIGURAR BD
+   # Asegurar DATABASE_URL en .env.local
+   bun prisma generate
+   bun prisma migrate dev --name init
+
+3. CREAR USUARIO DE TEST
+   # Crear script manual o usar seed
+   npx prisma db seed
+
+4. EJECUTAR LOCALMENTE
+   bun dev
+   # Abrir http://localhost:3000
+
+5. VER PRISMA STUDIO
+   bun prisma studio
+   # Abrir http://localhost:5555
+
+6. DEPLOYAR CAMBIOS
+   git add .
+   git commit -m "feat: add auth"
+   git push origin development
+   # Vercel deploy automático
+
+================================================================================
+SECCIÓN 19: ESTIMACIONES DE TIEMPO
+================================================================================
+
+FASE 1 (Seguridad):               8-12 horas
+FASE 2 (UX + Testing):           20-30 horas
+FASE 3 (Performance):            15-20 horas
+─────────────────────────────────────────
+TOTAL MVP FUNCIONAL:            43-62 horas (1-2 semanas tiempo dev)
+
+Con 1 dev full-time: 1-2 semanas
+Con 2 devs simultáneo: 3-5 días
+Con 3+ devs: parallelizar mucho
+
+FASE 4+ (Features): Depende de scope
+
+================================================================================
+CONCLUSIÓN
+================================================================================
+
+Academy Tech tiene potencial como plataforma de aprendizaje en línea. Sin
+embargo, está en fase MUY TEMPRANA (MVP incompleto). 
+
+PRIORIDADES INMEDIATAS (orden crítico):
+1. Implementar autenticación (sin esto, no hay usuarios)
+2. Poblar BD con cursos reales (sin datos, app = muestra vacía)
+3. Implementar API funcional (sin API, sin datos en frontend)
+4. Agregar testing básico (confianza en código)
+5. Setup CI/CD (prevenir regresiones)
+
+Después de estas 2-3 semanas, tendrán un MVP funcional y seguro que
+pueden monetizar, iterar, y escalar.
+
+El código está bien organizado (TypeScript, Next.js, Prisma son choices
+excelentes), pero necesita:
+- Lógica de negocio implementada
+- Testing y CI/CD
+- Security hardening
+- Observabilidad
+
+Recomendación: Sigan el plan FASE 1 → FASE 2 → FASE 3 en orden, NO traten
+de hacer todo a la vez. Mejor tener MVP pequeño y funcional que muchas
+features incompletas.
+
+================================================================================
+FIN DE AUDITORÍA
+================================================================================
+Generado: Mayo 2026
+Reporte completo listo para ejecutar
+
+Para preguntas específicas sobre cualquier sección, contactar al equipo
+técnico o abrir issues en GitHub con tag [audit].
