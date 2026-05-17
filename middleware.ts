@@ -80,7 +80,7 @@ export async function middleware(request: NextRequest) {
     try {
       const token = await getToken({
         req: request,
-        secret: process.env.NEXTAUTH_SECRET || 'development-secret-change-in-production',
+        secret: process.env.NEXTAUTH_SECRET || 'tradeiq-dev-secret-fallback',
       });
 
       if (!token) {

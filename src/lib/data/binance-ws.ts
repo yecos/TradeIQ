@@ -83,9 +83,11 @@ interface BinanceKlineMessage {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
+// US-first URL order: try binance.us first (works from US/Vercel/AWS),
+// then binance.com as fallback. This matches the REST API strategy.
 const WS_URLS = [
-  'wss://stream.binance.com:9443/ws',
   'wss://stream.binance.us:9443/ws',
+  'wss://stream.binance.com:9443/ws',
 ];
 
 const MAX_RECONNECT_ATTEMPTS = 20;
@@ -311,7 +313,13 @@ export class BinanceKlineWS {
 
       // Don't reconnect if we intentionally unsubscribed
       if (this.currentSymbol && this.currentInterval) {
-        this.scheduleReconnect();
+        // If we were never connected, try the alternate URL immediately
+        // (the current URL may be geo-blocked or unavailable)
+        if (!wasConnected) {
+          this.tryNextUrl();
+        } else {
+          this.scheduleReconnect();
+        }
       }
     };
   }

@@ -25,7 +25,6 @@
 
 import type { NextAuthOptions } from 'next-auth';
 import CredentialsProvider from 'next-auth/providers/credentials';
-import { PrismaAdapter } from '@next-auth/prisma-adapter';
 import { compare } from 'bcryptjs';
 import { prisma } from '@/lib/prisma';
 
@@ -59,18 +58,13 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
  * - The JWT is signed with NEXTAUTH_SECRET
  */
 export const authOptions: NextAuthOptions = {
-  // PrismaAdapter handles user/account creation in the database
-  // Note: Credentials provider doesn't use the adapter for session management,
-  // but we use it for user creation/lookup
-  // Wrapped in try-catch for environments where DB is not available (e.g., Vercel without DB)
-  adapter: (() => {
-    try {
-      return PrismaAdapter(prisma);
-    } catch {
-      console.warn('[TradeIQ] PrismaAdapter init failed — running without DB adapter');
-      return undefined;
-    }
-  })(),
+  // NOTE: No PrismaAdapter — Credentials provider + JWT strategy does NOT need it.
+  // The adapter was causing 500 errors because NextAuth tried to use it for
+  // session/account lookups that fail when DB is unavailable (e.g., Vercel read-only FS).
+  // User lookup is handled directly in the authorize() function via prisma.
+  // User creation is handled directly in /api/auth/register via prisma.
+  // If OAuth providers (Google, GitHub) are added later, the adapter should be
+  // conditionally included only for those providers.
 
   providers: [
     CredentialsProvider({
@@ -159,6 +153,9 @@ export const authOptions: NextAuthOptions = {
       return baseUrl;
     },
   },
+
+  // Fallback secret for development — MUST be set in production via env vars
+  secret: process.env.NEXTAUTH_SECRET || 'tradeiq-dev-secret-fallback',
 
   // Enable debug in development
   debug: process.env.NODE_ENV === 'development',
