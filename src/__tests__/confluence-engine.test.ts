@@ -29,9 +29,9 @@ function generateTestCandles(count: number, basePrice: number = 100): Candle[] {
 
 describe('Confluence Engine', () => {
   describe('generateConfluence', () => {
-    it('should generate a confluence result', () => {
+    it('should generate a confluence result', async () => {
       const candles = generateTestCandles(200);
-      const result = generateConfluence(candles, 'AAPL', ['technical']);
+      const result = await generateConfluence(candles, 'AAPL', ['technical']);
 
       expect(result).toBeDefined();
       expect(result.symbol).toBe('AAPL');
@@ -40,9 +40,9 @@ describe('Confluence Engine', () => {
       expect(result.confluenceScore).toBeLessThanOrEqual(100);
     });
 
-    it('should include entry, SL, and TP prices', () => {
+    it('should include entry, SL, and TP prices', async () => {
       const candles = generateTestCandles(200);
-      const result = generateConfluence(candles, 'AAPL', ['technical']);
+      const result = await generateConfluence(candles, 'AAPL', ['technical']);
 
       expect(result.entryPrice).toBeGreaterThan(0);
       expect(result.stopLoss).toBeGreaterThan(0);
@@ -50,27 +50,27 @@ describe('Confluence Engine', () => {
       expect(result.riskReward).toBeGreaterThan(0);
     });
 
-    it('should work with multiple vectors', () => {
+    it('should work with sync vectors only', async () => {
       const candles = generateTestCandles(200);
-      const result = generateConfluence(candles, 'AAPL', [
-        'technical', 'pattern', 'volume', 'news', 'sentiment', 'macro'
+      const result = await generateConfluence(candles, 'AAPL', [
+        'technical', 'pattern', 'volume'
       ]);
 
       expect(result).toBeDefined();
       expect(result.vectorSignals.length).toBeGreaterThan(0);
     });
 
-    it('should return NEUTRAL for no vectors', () => {
+    it('should return NEUTRAL for no vectors', async () => {
       const candles = generateTestCandles(200);
-      const result = generateConfluence(candles, 'AAPL', []);
+      const result = await generateConfluence(candles, 'AAPL', []);
 
       expect(result.overallDirection).toBe('NEUTRAL');
       expect(result.confluenceScore).toBe(0);
     });
 
-    it('should have valid risk:reward ratio', () => {
+    it('should have valid risk:reward ratio', async () => {
       const candles = generateTestCandles(200);
-      const result = generateConfluence(candles, 'AAPL', ['technical', 'pattern', 'volume']);
+      const result = await generateConfluence(candles, 'AAPL', ['technical', 'pattern', 'volume']);
 
       if (result.overallDirection !== 'NEUTRAL') {
         expect(result.riskReward).toBeGreaterThan(0);
@@ -82,19 +82,49 @@ describe('Confluence Engine', () => {
       }
     });
 
-    it('should include a recommendation string', () => {
+    it('should include a recommendation string', async () => {
       const candles = generateTestCandles(200);
-      const result = generateConfluence(candles, 'AAPL', ['technical']);
+      const result = await generateConfluence(candles, 'AAPL', ['technical']);
 
       expect(result.recommendation).toBeTypeOf('string');
       expect(result.recommendation.length).toBeGreaterThan(0);
     });
 
-    it('should include a timestamp', () => {
+    it('should include a timestamp', async () => {
       const candles = generateTestCandles(200);
-      const result = generateConfluence(candles, 'AAPL', ['technical']);
+      const result = await generateConfluence(candles, 'AAPL', ['technical']);
 
       expect(result.timestamp).toBeGreaterThan(0);
+    });
+
+    it('should accept precomputed results', async () => {
+      const candles = generateTestCandles(200);
+      // Pass precomputed technical to avoid double computation
+      const precomputed = {
+        technical: {
+          rsi: 35,
+          macd: { value: -0.5, signal: -0.3, histogram: -0.2 },
+          bollingerBands: { upper: 105, middle: 100, lower: 95 },
+          ema20: 100,
+          ema50: 99,
+          sma200: 98,
+          adx: 30,
+          atr: 2,
+          stochRSI: { k: 30, d: 35 },
+          signals: [{
+            vectorId: 'rsi',
+            vectorName: 'RSI',
+            direction: 'LONG' as const,
+            strength: 65,
+            confidence: 70,
+            detail: 'RSI oversold',
+          }],
+        },
+      };
+      const result = await generateConfluence(candles, 'AAPL', ['technical'], precomputed);
+
+      expect(result).toBeDefined();
+      expect(result.symbol).toBe('AAPL');
     });
   });
 });

@@ -58,60 +58,46 @@ export async function analyzeSentiment(symbol: string): Promise<SentimentAnalysi
 
 /**
  * Crypto sentiment: Fear & Greed Index + CoinGecko trending data
+ * All API calls run in parallel for speed
  */
 async function analyzeCryptoSentiment(symbol: string): Promise<SentimentAnalysis | null> {
-  // Fetch Fear & Greed Index
-  const fngResponse = await fetch('https://api.alternative.me/fng/?limit=1', {
-    signal: AbortSignal.timeout(5000),
-  });
+  // Run all 3 data sources in parallel for maximum speed
+  const [fngResult, trendingResult, aiResult] = await Promise.allSettled([
+    fetch('https://api.alternative.me/fng/?limit=1', { signal: AbortSignal.timeout(5000) })
+      .then(async (r) => r.ok ? r.json() : null),
+    fetch('https://api.coingecko.com/api/v3/search/trending', { signal: AbortSignal.timeout(8000) })
+      .then(async (r) => r.ok ? r.json() : null),
+    getAISocialSentiment(symbol),
+  ]);
 
+  // Parse Fear & Greed Index
   let fearGreedIndex = 50;
   let fearGreedLabel = 'Neutral';
 
-  if (fngResponse.ok) {
-    const fngData = await fngResponse.json();
-    if (fngData.data?.[0]) {
-      fearGreedIndex = parseInt(fngData.data[0].value, 10);
-      fearGreedLabel = fngData.data[0].value_classification;
-    }
+  if (fngResult.status === 'fulfilled' && fngResult.value?.data?.[0]) {
+    fearGreedIndex = parseInt(fngResult.value.data[0].value, 10);
+    fearGreedLabel = fngResult.value.data[0].value_classification;
   }
 
-  // Check CoinGecko trending to see if this coin is trending
+  // Parse CoinGecko trending
   let socialSentiment = 0;
-  try {
-    const trendingResponse = await fetch('https://api.coingecko.com/api/v3/search/trending', {
-      signal: AbortSignal.timeout(8000),
-    });
+  if (trendingResult.status === 'fulfilled' && trendingResult.value?.coins) {
+    const trendingCoins: { item: { symbol: string; score: number; data?: { price_change_percentage_24h?: { usd?: number } } } }[] = trendingResult.value.coins || [];
 
-    if (trendingResponse.ok) {
-      const trendingData = await trendingResponse.json();
-      const trendingCoins: { item: { symbol: string; score: number; data?: { price_change_percentage_24h?: { usd?: number } } } }[] = trendingData.coins || [];
+    const ourCoin = trendingCoins.find((c: { item: { symbol: string } }) =>
+      c.item.symbol.toUpperCase() === symbol.toUpperCase()
+    );
 
-      // Check if our symbol is trending
-      const ourCoin = trendingCoins.find((c: { item: { symbol: string } }) =>
-        c.item.symbol.toUpperCase() === symbol.toUpperCase()
-      );
-
-      if (ourCoin) {
-        // Trending = positive social sentiment boost
-        const priceChange = ourCoin.item.data?.price_change_percentage_24h?.usd || 0;
-        socialSentiment = Math.max(-1, Math.min(1, priceChange / 20)); // Normalize
-        // Being trending adds positive sentiment
-        socialSentiment = Math.min(1, socialSentiment + 0.3);
-      }
+    if (ourCoin) {
+      const priceChange = ourCoin.item.data?.price_change_percentage_24h?.usd || 0;
+      socialSentiment = Math.max(-1, Math.min(1, priceChange / 20));
+      socialSentiment = Math.min(1, socialSentiment + 0.3);
     }
-  } catch {
-    // CoinGecko trending might fail/rate limit, continue with Fear & Greed only
   }
 
-  // Use AI to get more nuanced social sentiment
-  try {
-    const aiSentiment = await getAISocialSentiment(symbol);
-    if (aiSentiment !== null) {
-      socialSentiment = socialSentiment === 0 ? aiSentiment : (socialSentiment + aiSentiment) / 2;
-    }
-  } catch {
-    // AI sentiment failed, continue with what we have
+  // Merge AI sentiment
+  if (aiResult.status === 'fulfilled' && aiResult.value !== null) {
+    socialSentiment = socialSentiment === 0 ? aiResult.value : (socialSentiment + aiResult.value) / 2;
   }
 
   // Generate signals

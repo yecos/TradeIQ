@@ -41,7 +41,7 @@ export const useAppStore = create<AppState>((set) => ({
   selectedSymbol: 'NVDA',
   setSelectedSymbol: (symbol) => set({ selectedSymbol: symbol }),
 
-  enabledVectors: ['technical', 'pattern', 'volume'],
+  enabledVectors: ['technical', 'pattern', 'volume', 'news', 'sentiment', 'macro'],
   toggleVector: (vectorId) =>
     set((state) => ({
       enabledVectors: state.enabledVectors.includes(vectorId)

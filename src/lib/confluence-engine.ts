@@ -2,14 +2,17 @@ import type { Candle, VectorSignal, ConfluenceResult, TechnicalAnalysis, Pattern
 import { analyzeTechnical } from './technical-analysis';
 import { detectPatterns } from './pattern-detection';
 import { analyzeVolume } from './volume-analysis';
+import { analyzeNews } from './news-analysis';
+import { analyzeSentiment } from './sentiment-analysis';
+import { analyzeMacro } from './macro-analysis';
 import { VECTOR_DEFINITIONS } from './vector-definitions';
 
 /**
  * Generate confluence from pre-computed analysis results.
- * Avoids double computation — the API route already computed technical/pattern/volume,
- * so we accept them as parameters instead of re-running them.
+ * Now async to support real API calls for news/sentiment/macro when not precomputed.
+ * The API route passes precomputed results to avoid double computation.
  */
-export function generateConfluence(
+export async function generateConfluence(
   candles: Candle[],
   symbol: string,
   enabledVectors: string[],
@@ -21,7 +24,7 @@ export function generateConfluence(
     sentiment?: SentimentAnalysis | null;
     macro?: MacroAnalysis | null;
   }
-): ConfluenceResult {
+): Promise<ConfluenceResult> {
   const allSignals: VectorSignal[] = [];
   const lastPrice = candles[candles.length - 1].close;
   const atr = calculateSimpleATR(candles);
@@ -33,12 +36,27 @@ export function generateConfluence(
   }
 
   // Use precomputed results if available, otherwise compute them
+  // Sync vectors (technical/pattern/volume) are computed instantly
+  // Async vectors (news/sentiment/macro) use real API modules with fallback
   const technical = precomputed?.technical ?? (enabledVectors.includes('technical') ? analyzeTechnical(candles) : null);
   const patterns = precomputed?.patterns ?? (enabledVectors.includes('pattern') ? detectPatterns(candles) : null);
   const volume = precomputed?.volume ?? (enabledVectors.includes('volume') ? analyzeVolume(candles) : null);
-  const news = precomputed?.news ?? (enabledVectors.includes('news') ? generateSimulatedNewsAnalysis(symbol) : null);
-  const sentiment = precomputed?.sentiment ?? (enabledVectors.includes('sentiment') ? generateSimulatedSentimentAnalysis(symbol) : null);
-  const macro = precomputed?.macro ?? (enabledVectors.includes('macro') ? generateSimulatedMacroAnalysis() : null);
+
+  // For async vectors: if not precomputed, call the real analysis modules
+  // (which have their own caching and fallback logic)
+  let news = precomputed?.news ?? null;
+  let sentiment = precomputed?.sentiment ?? null;
+  let macro = precomputed?.macro ?? null;
+
+  if (enabledVectors.includes('news') && !news) {
+    news = await analyzeNews(symbol);
+  }
+  if (enabledVectors.includes('sentiment') && !sentiment) {
+    sentiment = await analyzeSentiment(symbol);
+  }
+  if (enabledVectors.includes('macro') && !macro) {
+    macro = await analyzeMacro(symbol);
+  }
 
   // Collect signals from all enabled vectors, applying weights
   if (technical && enabledVectors.includes('technical')) {
@@ -165,199 +183,4 @@ function calculateSimpleATR(candles: Candle[], period: number = 14): number {
   return lastN.reduce((a, b) => a + b, 0) / lastN.length;
 }
 
-// --- News Analysis (simulated with structured output) ---
 
-function generateSimulatedNewsAnalysis(symbol: string): NewsAnalysis {
-  const newsSentiments: Record<string, { sentiment: number; headlines: NewsAnalysis['headlines'] }> = {
-    'NVDA': {
-      sentiment: 0.6,
-      headlines: [
-        { title: 'NVIDIA supera estimaciones de ingresos por chips IA', sentiment: 0.7, impact: 'high', date: new Date().toISOString() },
-        { title: 'Demanda de data centers impulza crecimiento', sentiment: 0.5, impact: 'medium', date: new Date().toISOString() },
-      ],
-    },
-    'AAPL': {
-      sentiment: 0.3,
-      headlines: [
-        { title: 'Apple presenta nuevos productos en evento anual', sentiment: 0.4, impact: 'medium', date: new Date().toISOString() },
-        { title: 'Ventas de iPhone estables en trimestre', sentiment: 0.2, impact: 'low', date: new Date().toISOString() },
-      ],
-    },
-    'TSLA': {
-      sentiment: -0.3,
-      headlines: [
-        { title: 'Márgenes de Tesla bajo presión por guerra de precios', sentiment: -0.5, impact: 'high', date: new Date().toISOString() },
-        { title: 'Competencia creciente en mercado de EVs', sentiment: -0.2, impact: 'medium', date: new Date().toISOString() },
-      ],
-    },
-    'BTC': {
-      sentiment: 0.4,
-      headlines: [
-        { title: 'Bitcoin mantiene niveles de soporte clave', sentiment: 0.3, impact: 'medium', date: new Date().toISOString() },
-        { title: 'Flujo institucional positivo en ETFs spot', sentiment: 0.5, impact: 'high', date: new Date().toISOString() },
-      ],
-    },
-    'ETH': {
-      sentiment: 0.3,
-      headlines: [
-        { title: 'Ethereum actividad en DeFi se mantiene estable', sentiment: 0.3, impact: 'medium', date: new Date().toISOString() },
-      ],
-    },
-  };
-
-  const defaultAnalysis = {
-    sentiment: 0,
-    headlines: [
-      { title: 'Sin catalizadores significativos detectados', sentiment: 0, impact: 'low' as const, date: new Date().toISOString() },
-    ],
-  };
-
-  const data = newsSentiments[symbol] ?? defaultAnalysis;
-  const sentimentLabel: NewsAnalysis['sentimentLabel'] =
-    data.sentiment > 0.5 ? 'very_bullish' :
-    data.sentiment > 0.1 ? 'bullish' :
-    data.sentiment < -0.5 ? 'very_bearish' :
-    data.sentiment < -0.1 ? 'bearish' : 'neutral';
-
-  const signals: VectorSignal[] = [];
-  if (data.sentiment > 0.2) {
-    signals.push({
-      vectorId: 'news',
-      vectorName: 'Noticias',
-      direction: 'LONG',
-      strength: Math.round(Math.abs(data.sentiment) * 100),
-      confidence: 60,
-      detail: `Sentimiento de noticias positivo. ${data.headlines.filter(h => h.sentiment > 0).length} headlines alcistas.`,
-    });
-  } else if (data.sentiment < -0.2) {
-    signals.push({
-      vectorId: 'news',
-      vectorName: 'Noticias',
-      direction: 'SHORT',
-      strength: Math.round(Math.abs(data.sentiment) * 100),
-      confidence: 60,
-      detail: `Sentimiento de noticias negativo. ${data.headlines.filter(h => h.sentiment < 0).length} headlines bajistas.`,
-    });
-  } else {
-    signals.push({
-      vectorId: 'news',
-      vectorName: 'Noticias',
-      direction: 'NEUTRAL',
-      strength: 30,
-      confidence: 50,
-      detail: 'Noticias con impacto moderado. Sin catalizador claro.',
-    });
-  }
-
-  return {
-    sentiment: data.sentiment,
-    sentimentLabel,
-    headlines: data.headlines,
-    signals,
-  };
-}
-
-// --- Sentiment Analysis (simulated with structured output) ---
-
-function generateSimulatedSentimentAnalysis(symbol: string): SentimentAnalysis {
-  const sentiments: Record<string, { social: number; fearGreed: number; putCall?: number }> = {
-    'NVDA': { social: 0.6, fearGreed: 72, putCall: 0.7 },
-    'AAPL': { social: 0.3, fearGreed: 58, putCall: 0.9 },
-    'TSLA': { social: -0.2, fearGreed: 35, putCall: 1.3 },
-    'MSFT': { social: 0.4, fearGreed: 62, putCall: 0.8 },
-    'META': { social: 0.5, fearGreed: 65, putCall: 0.85 },
-    'BTC': { social: 0.5, fearGreed: 68 },
-    'ETH': { social: 0.35, fearGreed: 60 },
-  };
-
-  const data = sentiments[symbol] ?? { social: 0, fearGreed: 50 };
-
-  const signals: VectorSignal[] = [];
-  const overallSentiment = (data.social + (data.fearGreed - 50) / 100) / 2;
-
-  if (overallSentiment > 0.2) {
-    signals.push({
-      vectorId: 'sentiment',
-      vectorName: 'Sentimiento',
-      direction: 'LONG',
-      strength: Math.round(Math.abs(overallSentiment) * 100),
-      confidence: 55,
-      detail: `Sentimiento social positivo (${(data.social * 100).toFixed(0)}%). Fear & Greed: ${data.fearGreed}.`,
-    });
-  } else if (overallSentiment < -0.2) {
-    signals.push({
-      vectorId: 'sentiment',
-      vectorName: 'Sentimiento',
-      direction: 'SHORT',
-      strength: Math.round(Math.abs(overallSentiment) * 100),
-      confidence: 55,
-      detail: `Sentimiento social negativo (${(data.social * 100).toFixed(0)}%). Fear & Greed: ${data.fearGreed}.`,
-    });
-  } else {
-    signals.push({
-      vectorId: 'sentiment',
-      vectorName: 'Sentimiento',
-      direction: 'NEUTRAL',
-      strength: 25,
-      confidence: 45,
-      detail: `Sentimiento neutral. Fear & Greed: ${data.fearGreed}. Sin extremo detectado.`,
-    });
-  }
-
-  return {
-    fearGreedIndex: data.fearGreed,
-    socialSentiment: data.social,
-    putCallRatio: data.putCall,
-    signals,
-  };
-}
-
-// --- Macro Analysis (simulated with structured output) ---
-
-function generateSimulatedMacroAnalysis(): MacroAnalysis {
-  // Simulated macro environment — would use real economic calendar API in production
-  const signals: VectorSignal[] = [];
-
-  // Simulate Fed environment — currently neutral
-  // Possible values: 'hawkish' | 'dovish' | 'neutral'
-  const fedTrend = 'neutral' as MacroAnalysis['fedRateTrend'];
-
-  const events: MacroAnalysis['economicEvents'] = [
-    {
-      event: 'Fed Interest Rate Decision',
-      impact: 'high',
-      date: new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
-      forecast: '5.25-5.50%',
-      previous: '5.25-5.50%',
-    },
-    {
-      event: 'CPI Data Release',
-      impact: 'high',
-      date: new Date(Date.now() + 3 * 86400000).toISOString().split('T')[0],
-      forecast: '+0.3%',
-      previous: '+0.4%',
-    },
-    {
-      event: 'Non-Farm Payrolls',
-      impact: 'high',
-      date: new Date(Date.now() + 10 * 86400000).toISOString().split('T')[0],
-      forecast: '180K',
-      previous: '175K',
-    },
-  ];
-
-  signals.push({
-    vectorId: 'macro',
-    vectorName: 'Macro',
-    direction: 'NEUTRAL',
-    strength: 35,
-    confidence: 50,
-    detail: `Entorno macro ${fedTrend === 'hawkish' ? 'restrictivo (Fed hawkish)' : fedTrend === 'dovish' ? 'accomodaticio (Fed dovish)' : 'neutral'}. ${events.filter(e => e.impact === 'high').length} eventos de alto impacto próximos.`,
-  });
-
-  return {
-    fedRateTrend: fedTrend,
-    economicEvents: events,
-    signals,
-  };
-}

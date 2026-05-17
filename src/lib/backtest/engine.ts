@@ -17,10 +17,10 @@ import { calculateMetrics } from './metrics';
  * 6. Records all trades and builds an equity curve
  * 7. Calculates performance metrics at the end
  */
-export function runBacktest(
+export async function runBacktest(
   candles: Candle[],
   config: Partial<BacktestConfig> = {}
-): BacktestResult {
+): Promise<BacktestResult> {
   const fullConfig: BacktestConfig = { ...DEFAULT_BACKTEST_CONFIG, ...config };
 
   const warmupPeriod = 50; // Need 50 candles minimum for indicators
@@ -58,7 +58,7 @@ export function runBacktest(
 
     // If no open position, check for new entry
     if (!openTrade && i < candles.length - 1) {
-      const confluence = generateConfluence(
+      const confluence = await generateConfluence(
         historicalCandles,
         fullConfig.symbol,
         fullConfig.vectors

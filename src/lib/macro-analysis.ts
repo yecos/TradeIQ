@@ -116,10 +116,11 @@ Rules:
     const fedTrend = ['hawkish', 'dovish', 'neutral'].includes(parsed.fedRateTrend)
       ? parsed.fedRateTrend : 'neutral';
 
-    const events: MacroAnalysis['economicEvents'] = (parsed.economicEvents || []).slice(0, 4).map((e: { event?: string; impact?: string; forecast?: string | null; previous?: string | null }) => ({
+    const events: MacroAnalysis['economicEvents'] = (parsed.economicEvents || []).slice(0, 4).map((e: { event?: string; impact?: string; forecast?: string | null; previous?: string | null }, idx: number) => ({
       event: e.event || 'Economic Event',
       impact: (['high', 'medium', 'low'].includes(e.impact || '') ? e.impact : 'medium') as 'high' | 'medium' | 'low',
-      date: new Date(Date.now() + Math.random() * 14 * 86400000).toISOString().split('T')[0], // Approximate
+      // Deterministic dates: distribute events across next 14 days based on index
+      date: new Date(Date.now() + (idx + 1) * 3 * 86400000).toISOString().split('T')[0],
       forecast: e.forecast || undefined,
       previous: e.previous || undefined,
     }));

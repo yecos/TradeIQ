@@ -31,9 +31,9 @@ function generateTestCandles(count: number, basePrice: number = 100): Candle[] {
 
 describe('Backtest Engine', () => {
   describe('runBacktest', () => {
-    it('should return a valid backtest result', () => {
+    it('should return a valid backtest result', async () => {
       const candles = generateTestCandles(200);
-      const result = runBacktest(candles, { symbol: 'TEST' });
+      const result = await runBacktest(candles, { symbol: 'TEST' });
 
       expect(result).toBeDefined();
       expect(result.config.symbol).toBe('TEST');
@@ -42,17 +42,17 @@ describe('Backtest Engine', () => {
       expect(result.metrics).toBeDefined();
     });
 
-    it('should return empty result for insufficient data', () => {
+    it('should return empty result for insufficient data', async () => {
       const candles = generateTestCandles(20);
-      const result = runBacktest(candles, { symbol: 'TEST' });
+      const result = await runBacktest(candles, { symbol: 'TEST' });
 
       expect(result.metrics.totalTrades).toBe(0);
       expect(result.trades).toHaveLength(0);
     });
 
-    it('should have valid metrics structure', () => {
+    it('should have valid metrics structure', async () => {
       const candles = generateTestCandles(200);
-      const result = runBacktest(candles, { symbol: 'TEST' });
+      const result = await runBacktest(candles, { symbol: 'TEST' });
 
       const m = result.metrics;
       expect(m).toHaveProperty('totalTrades');
@@ -66,9 +66,9 @@ describe('Backtest Engine', () => {
       expect(m).toHaveProperty('totalPnlPercent');
     });
 
-    it('should have valid equity curve', () => {
+    it('should have valid equity curve', async () => {
       const candles = generateTestCandles(200);
-      const result = runBacktest(candles, { symbol: 'TEST' });
+      const result = await runBacktest(candles, { symbol: 'TEST' });
 
       expect(result.equityCurve.length).toBeGreaterThan(0);
 
@@ -79,19 +79,19 @@ describe('Backtest Engine', () => {
       }
     });
 
-    it('should respect minimum confluence score', () => {
+    it('should respect minimum confluence score', async () => {
       const candles = generateTestCandles(200);
-      const result1 = runBacktest(candles, { symbol: 'TEST', minConfluenceScore: 20 });
-      const result2 = runBacktest(candles, { symbol: 'TEST', minConfluenceScore: 90 });
+      const result1 = await runBacktest(candles, { symbol: 'TEST', minConfluenceScore: 20 });
+      const result2 = await runBacktest(candles, { symbol: 'TEST', minConfluenceScore: 90 });
 
       // Very high threshold (90) should produce 0 or very few trades
       // since it's extremely unlikely to get 90% confluence with random data
       expect(result2.metrics.totalTrades).toBeLessThanOrEqual(result1.metrics.totalTrades + 2);
     });
 
-    it('should have trades with correct structure when trades exist', () => {
+    it('should have trades with correct structure when trades exist', async () => {
       const candles = generateTestCandles(300);
-      const result = runBacktest(candles, {
+      const result = await runBacktest(candles, {
         symbol: 'TEST',
         minConfluenceScore: 20, // Lower threshold to get more trades
       });
@@ -108,9 +108,9 @@ describe('Backtest Engine', () => {
       }
     });
 
-    it('should use initial capital from config', () => {
+    it('should use initial capital from config', async () => {
       const candles = generateTestCandles(200);
-      const result = runBacktest(candles, {
+      const result = await runBacktest(candles, {
         symbol: 'TEST',
         initialCapital: 50000,
       });
@@ -118,9 +118,9 @@ describe('Backtest Engine', () => {
       expect(result.config.initialCapital).toBe(50000);
     });
 
-    it('should generate dates in the result', () => {
+    it('should generate dates in the result', async () => {
       const candles = generateTestCandles(200);
-      const result = runBacktest(candles, { symbol: 'TEST' });
+      const result = await runBacktest(candles, { symbol: 'TEST' });
 
       expect(result.startDate).toBeTruthy();
       expect(result.endDate).toBeTruthy();

@@ -65,7 +65,7 @@ async function runAnalysis(symbol: string, enabledVectors: string[]) {
   ]);
 
   // Generate confluence — pass precomputed results (no double computation)
-  const confluence = generateConfluence(candles, symbol, enabledVectors, {
+  const confluence = await generateConfluence(candles, symbol, enabledVectors, {
     technical,
     patterns,
     volume,

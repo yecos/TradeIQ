@@ -43,7 +43,7 @@ export const VECTOR_DEFINITIONS: VectorDefinition[] = [
     description: 'IA analiza noticias financieras, earnings, eventos corporativos y evalúa impacto en el precio',
     icon: 'Newspaper',
     color: '#ef4444',
-    defaultEnabled: false,
+    defaultEnabled: true,
     defaultWeight: 1.3,
   },
   {
@@ -54,7 +54,7 @@ export const VECTOR_DEFINITIONS: VectorDefinition[] = [
     description: 'Fear & Greed Index, sentimiento social (Twitter/X, Reddit), flujo de opciones put/call',
     icon: 'Brain',
     color: '#8b5cf6',
-    defaultEnabled: false,
+    defaultEnabled: true,
     defaultWeight: 0.8,
   },
   {
@@ -65,7 +65,7 @@ export const VECTOR_DEFINITIONS: VectorDefinition[] = [
     description: 'Decisiones de la Fed, calendario económico, tasas de interés, datos de inflación y empleo',
     icon: 'Building2',
     color: '#06b6d4',
-    defaultEnabled: false,
+    defaultEnabled: true,
     defaultWeight: 0.7,
   },
 ];

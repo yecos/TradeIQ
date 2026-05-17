@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
       tpMultiplier: tpMultiplier || 3.0,
     };
 
-    const result = runBacktest(candles, config);
+    const result = await runBacktest(candles, config);
 
     return NextResponse.json(result);
   } catch (error) {
