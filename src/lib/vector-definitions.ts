@@ -68,4 +68,15 @@ export const VECTOR_DEFINITIONS: VectorDefinition[] = [
     defaultEnabled: true,
     defaultWeight: 0.7,
   },
+  {
+    id: 'orderflow',
+    category: 'orderflow' as const,
+    name: 'orderflow',
+    label: 'Order Flow',
+    description: 'Análisis del flujo de órdenes, libro de órdenes y microestructura del mercado',
+    icon: 'BarChart3',
+    color: '#f97316',
+    defaultEnabled: false, // Off by default since it requires extra API calls
+    defaultWeight: 1.1,
+  },
 ];

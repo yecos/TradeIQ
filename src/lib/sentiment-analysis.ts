@@ -1,12 +1,16 @@
 import type { SentimentAnalysis, VectorSignal } from './types';
+import { getSDK } from './ai/sdk';
+import { SENTIMENT_ANALYSIS_PROMPT } from './ai/prompts';
 
 /**
- * Sentiment Analysis Module — Real-time market sentiment using free APIs.
+ * Sentiment Analysis Module — Enhanced real-time market sentiment.
  *
- * Data sources:
- * 1. Fear & Greed Index (alternative.me) — free, no API key, crypto market sentiment
- * 2. CoinGecko trending — free, shows which coins are trending (social interest)
- * 3. z-ai-web-dev-sdk web search — for stock social sentiment analysis
+ * Improvements:
+ * 1. SDK singleton for efficiency
+ * 2. Enhanced prompt with contrarian detection, dominant emotion, narrative strength
+ * 3. Multi-source aggregation (Fear & Greed + AI + CoinGecko)
+ * 4. Contrarian signal detection (extreme sentiment = potential reversal)
+ * 5. Better confidence based on source agreement
  *
  * Cache: 10 minutes (sentiment updates slowly)
  */
@@ -34,13 +38,13 @@ export async function analyzeSentiment(symbol: string): Promise<SentimentAnalysi
 
   try {
     if (isCrypto) {
-      const result = await withTimeout(analyzeCryptoSentiment(symbol), 8000);
+      const result = await withTimeout(analyzeCryptoSentimentEnhanced(symbol), 10000);
       if (result) {
         cache.set(symbol, { data: result, timestamp: Date.now() });
         return result;
       }
     } else {
-      const result = await withTimeout(analyzeStockSentiment(symbol), 8000);
+      const result = await withTimeout(analyzeStockSentimentEnhanced(symbol), 10000);
       if (result) {
         cache.set(symbol, { data: result, timestamp: Date.now() });
         return result;
@@ -57,17 +61,16 @@ export async function analyzeSentiment(symbol: string): Promise<SentimentAnalysi
 }
 
 /**
- * Crypto sentiment: Fear & Greed Index + CoinGecko trending data
- * All API calls run in parallel for speed
+ * Enhanced crypto sentiment: Fear & Greed + CoinGecko trending + Enhanced AI analysis
  */
-async function analyzeCryptoSentiment(symbol: string): Promise<SentimentAnalysis | null> {
-  // Run all 3 data sources in parallel for maximum speed
+async function analyzeCryptoSentimentEnhanced(symbol: string): Promise<SentimentAnalysis | null> {
+  // Run all data sources in parallel
   const [fngResult, trendingResult, aiResult] = await Promise.allSettled([
     fetch('https://api.alternative.me/fng/?limit=1', { signal: AbortSignal.timeout(5000) })
       .then(async (r) => r.ok ? r.json() : null),
     fetch('https://api.coingecko.com/api/v3/search/trending', { signal: AbortSignal.timeout(8000) })
       .then(async (r) => r.ok ? r.json() : null),
-    getAISocialSentiment(symbol),
+    getEnhancedAISentiment(symbol, true),
   ]);
 
   // Parse Fear & Greed Index
@@ -95,32 +98,60 @@ async function analyzeCryptoSentiment(symbol: string): Promise<SentimentAnalysis
     }
   }
 
-  // Merge AI sentiment
+  // Parse AI enhanced sentiment
+  let aiSocialSentiment = 0;
+  let aiConfidence = 50;
+  let dominantEmotion = 'neutral';
+  let contrarianSignal = false;
+
   if (aiResult.status === 'fulfilled' && aiResult.value !== null) {
-    socialSentiment = socialSentiment === 0 ? aiResult.value : (socialSentiment + aiResult.value) / 2;
+    aiSocialSentiment = aiResult.value.socialSentiment;
+    aiConfidence = aiResult.value.confidence;
+    dominantEmotion = aiResult.value.dominantEmotion;
+    contrarianSignal = aiResult.value.contrarianSignal;
   }
 
-  // Generate signals
-  const signals: VectorSignal[] = [];
-  const overallSentiment = (fearGreedIndex - 50) / 100 * 0.5 + socialSentiment * 0.5;
+  // Merge: weight AI higher than CoinGecko
+  if (aiSocialSentiment !== 0) {
+    socialSentiment = socialSentiment === 0 ? aiSocialSentiment : (socialSentiment * 0.3 + aiSocialSentiment * 0.7);
+  }
 
+  // Generate signals with contrarian awareness
+  const signals: VectorSignal[] = [];
+  const overallSentiment = (fearGreedIndex - 50) / 100 * 0.3 + socialSentiment * 0.7;
+
+  // Contrarian adjustment: if extreme sentiment detected, reduce confidence
+  let adjustedConfidence = aiConfidence;
+  if (contrarianSignal) {
+    adjustedConfidence = Math.max(30, aiConfidence - 20); // Lower confidence for extreme sentiment
+  }
+
+  let detail = '';
   if (overallSentiment > 0.15) {
+    detail = `Fear & Greed: ${fearGreedIndex} (${fearGreedLabel}). Sentimiento social positivo (${(socialSentiment * 100).toFixed(0)}%).`;
+    if (dominantEmotion !== 'neutral') detail += ` Emoción dominante: ${dominantEmotion}.`;
+    if (contrarianSignal) detail += ' ⚠️ Sentimiento extremo — posible reversión.';
+
     signals.push({
       vectorId: 'sentiment',
       vectorName: 'Sentimiento',
       direction: 'LONG',
       strength: Math.round(Math.abs(overallSentiment) * 100),
-      confidence: 60,
-      detail: `Fear & Greed: ${fearGreedIndex} (${fearGreedLabel}). Sentimiento social positivo (${(socialSentiment * 100).toFixed(0)}%).`,
+      confidence: adjustedConfidence,
+      detail,
     });
   } else if (overallSentiment < -0.15) {
+    detail = `Fear & Greed: ${fearGreedIndex} (${fearGreedLabel}). Sentimiento social negativo (${(socialSentiment * 100).toFixed(0)}%).`;
+    if (dominantEmotion !== 'neutral') detail += ` Emoción dominante: ${dominantEmotion}.`;
+    if (contrarianSignal) detail += ' ⚠️ Sentimiento extremo — posible reversión.';
+
     signals.push({
       vectorId: 'sentiment',
       vectorName: 'Sentimiento',
       direction: 'SHORT',
       strength: Math.round(Math.abs(overallSentiment) * 100),
-      confidence: 60,
-      detail: `Fear & Greed: ${fearGreedIndex} (${fearGreedLabel}). Sentimiento social negativo (${(socialSentiment * 100).toFixed(0)}%).`,
+      confidence: adjustedConfidence,
+      detail,
     });
   } else {
     signals.push({
@@ -128,7 +159,7 @@ async function analyzeCryptoSentiment(symbol: string): Promise<SentimentAnalysis
       vectorName: 'Sentimiento',
       direction: 'NEUTRAL',
       strength: 25,
-      confidence: 50,
+      confidence: adjustedConfidence || 50,
       detail: `Fear & Greed: ${fearGreedIndex} (${fearGreedLabel}). Sentimiento neutral.`,
     });
   }
@@ -136,15 +167,15 @@ async function analyzeCryptoSentiment(symbol: string): Promise<SentimentAnalysis
   return {
     fearGreedIndex,
     socialSentiment: Math.round(socialSentiment * 100) / 100,
-    putCallRatio: undefined, // Not available for crypto
+    putCallRatio: undefined,
     signals,
   };
 }
 
 /**
- * Stock sentiment: Use AI web search for social sentiment + Fear & Greed as market baseline
+ * Enhanced stock sentiment: AI analysis + Fear & Greed baseline
  */
-async function analyzeStockSentiment(symbol: string): Promise<SentimentAnalysis | null> {
+async function analyzeStockSentimentEnhanced(symbol: string): Promise<SentimentAnalysis | null> {
   // Get Fear & Greed as market baseline
   let fearGreedIndex = 50;
   try {
@@ -161,76 +192,57 @@ async function analyzeStockSentiment(symbol: string): Promise<SentimentAnalysis 
     // Fear & Greed is crypto-specific but serves as general market risk sentiment
   }
 
-  // Use AI for stock-specific sentiment
+  // Enhanced AI analysis for stock sentiment
+  const aiResult = await getEnhancedAISentiment(symbol, false);
+
   let socialSentiment = 0;
+  let aiConfidence = 50;
   let putCallRatio = 1.0;
+  let dominantEmotion = 'neutral';
+  let contrarianSignal = false;
 
-  try {
-    const ZAI = (await import('z-ai-web-dev-sdk')).default;
-    const zai = await ZAI.create();
-
-    const searchResults = await zai.functions.invoke('web_search', {
-      query: `${symbol} stock sentiment analysis social media`,
-      num: 5,
-      recency_days: 3,
-    });
-
-    if (searchResults && searchResults.length > 0) {
-      const context = searchResults.slice(0, 4).map((r: { name: string; snippet: string }, i: number) =>
-        `${i + 1}. ${r.name}: ${r.snippet}`
-      ).join('\n');
-
-      const completion = await zai.chat.completions.create({
-        messages: [
-          {
-            role: 'system',
-            content: `You are a market sentiment analyst. Given search results about a stock, return a JSON object:
-{"socialSentiment": number -1 to 1, "putCallRatio": number (typical range 0.5-2.0)}
-Return ONLY valid JSON.`,
-          },
-          {
-            role: 'user',
-            content: `Analyze the sentiment for ${symbol}:\n${context}`,
-          },
-        ],
-      });
-
-      const content = completion.choices?.[0]?.message?.content;
-      if (content) {
-        const match = content.match(/\{[\s\S]*\}/);
-        if (match) {
-          const parsed = JSON.parse(match[0]);
-          socialSentiment = Math.max(-1, Math.min(1, parsed.socialSentiment || 0));
-          if (parsed.putCallRatio && parsed.putCallRatio > 0) {
-            putCallRatio = parsed.putCallRatio;
-          }
-        }
-      }
-    }
-  } catch {
-    // AI analysis failed, use Fear & Greed only
+  if (aiResult) {
+    socialSentiment = aiResult.socialSentiment;
+    aiConfidence = aiResult.confidence;
+    putCallRatio = aiResult.putCallRatio || 1.0;
+    dominantEmotion = aiResult.dominantEmotion;
+    contrarianSignal = aiResult.contrarianSignal;
   }
 
   const signals: VectorSignal[] = [];
-  const overallSentiment = (fearGreedIndex - 50) / 100 * 0.3 + socialSentiment * 0.7;
+  const overallSentiment = (fearGreedIndex - 50) / 100 * 0.2 + socialSentiment * 0.8;
 
+  let adjustedConfidence = aiConfidence;
+  if (contrarianSignal) {
+    adjustedConfidence = Math.max(30, aiConfidence - 20);
+  }
+
+  let detail = '';
   if (overallSentiment > 0.15) {
+    detail = `Sentimiento social positivo (${(socialSentiment * 100).toFixed(0)}%). Fear & Greed: ${fearGreedIndex}.`;
+    if (dominantEmotion !== 'neutral') detail += ` Emoción: ${dominantEmotion}.`;
+    if (contrarianSignal) detail += ' ⚠️ Sentimiento extremo — posible reversión.';
+
     signals.push({
       vectorId: 'sentiment',
       vectorName: 'Sentimiento',
       direction: 'LONG',
       strength: Math.round(Math.abs(overallSentiment) * 100),
-      confidence: 55,
-      detail: `Sentimiento social positivo (${(socialSentiment * 100).toFixed(0)}%). Fear & Greed: ${fearGreedIndex}.`,
+      confidence: adjustedConfidence,
+      detail,
     });
   } else if (overallSentiment < -0.15) {
+    detail = `Sentimiento social negativo (${(socialSentiment * 100).toFixed(0)}%). Fear & Greed: ${fearGreedIndex}.`;
+    if (dominantEmotion !== 'neutral') detail += ` Emoción: ${dominantEmotion}.`;
+    if (contrarianSignal) detail += ' ⚠️ Sentimiento extremo — posible reversión.';
+
     signals.push({
       vectorId: 'sentiment',
       vectorName: 'Sentimiento',
       direction: 'SHORT',
       strength: Math.round(Math.abs(overallSentiment) * 100),
-      confidence: 55,
-      detail: `Sentimiento social negativo (${(socialSentiment * 100).toFixed(0)}%). Fear & Greed: ${fearGreedIndex}.`,
+      confidence: adjustedConfidence,
+      detail,
     });
   } else {
     signals.push({
@@ -238,7 +250,7 @@ Return ONLY valid JSON.`,
       vectorName: 'Sentimiento',
       direction: 'NEUTRAL',
       strength: 25,
-      confidence: 45,
+      confidence: adjustedConfidence || 45,
       detail: `Sentimiento neutral. Fear & Greed: ${fearGreedIndex}.`,
     });
   }
@@ -252,22 +264,42 @@ Return ONLY valid JSON.`,
 }
 
 /**
- * Helper: Get social sentiment from AI for any symbol
+ * Enhanced AI sentiment analysis with contrarian detection
  */
-async function getAISocialSentiment(symbol: string): Promise<number | null> {
+interface EnhancedSentimentResult {
+  socialSentiment: number;
+  confidence: number;
+  dominantEmotion: string;
+  narrativeStrength: number;
+  putCallRatio?: number;
+  contrarianSignal: boolean;
+}
+
+async function getEnhancedAISentiment(symbol: string, isCrypto: boolean): Promise<EnhancedSentimentResult | null> {
   try {
-    const ZAI = (await import('z-ai-web-dev-sdk')).default;
-    const zai = await ZAI.create();
+    const zai = await getSDK();
 
-    const searchResults = await zai.functions.invoke('web_search', {
-      query: `${symbol} social sentiment reddit twitter`,
-      num: 3,
-      recency_days: 3,
-    });
+    const [socialSearch, forumSearch] = await Promise.all([
+      zai.functions.invoke('web_search', {
+        query: isCrypto
+          ? `${symbol} crypto social sentiment reddit twitter analysis`
+          : `${symbol} stock sentiment analysis social media reddit`,
+        num: 5,
+        recency_days: 3,
+      }),
+      zai.functions.invoke('web_search', {
+        query: isCrypto
+          ? `${symbol} bitcoin crypto fear greed market mood`
+          : `${symbol} stock analyst opinion upgrade downgrade`,
+        num: 4,
+        recency_days: 5,
+      }),
+    ]);
 
-    if (!searchResults || searchResults.length === 0) return null;
+    const allResults = [...(socialSearch || []), ...(forumSearch || [])];
+    if (allResults.length === 0) return null;
 
-    const context = searchResults.slice(0, 3).map((r: { name: string; snippet: string }, i: number) =>
+    const context = allResults.slice(0, 6).map((r: { name: string; snippet: string }, i: number) =>
       `${i + 1}. ${r.name}: ${r.snippet}`
     ).join('\n');
 
@@ -275,24 +307,34 @@ async function getAISocialSentiment(symbol: string): Promise<number | null> {
       messages: [
         {
           role: 'system',
-          content: 'Return ONLY a number between -1 and 1 representing social media sentiment for the given cryptocurrency. -1=very bearish, 0=neutral, 1=very bullish. Return ONLY the number.',
+          content: SENTIMENT_ANALYSIS_PROMPT,
         },
         {
           role: 'user',
-          content: `${symbol} sentiment:\n${context}`,
+          content: `Analyze the market sentiment for ${symbol} (${isCrypto ? 'cryptocurrency' : 'stock'}):\n${context}`,
         },
       ],
     });
 
-    const content = completion.choices?.[0]?.message?.content?.trim();
-    if (content) {
-      const num = parseFloat(content);
-      if (!isNaN(num)) return Math.max(-1, Math.min(1, num));
-    }
+    const content = completion.choices?.[0]?.message?.content;
+    if (!content) return null;
+
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return null;
+
+    const parsed = JSON.parse(jsonMatch[0]);
+
+    return {
+      socialSentiment: Math.max(-1, Math.min(1, parsed.socialSentiment || 0)),
+      confidence: Math.max(0, Math.min(100, parsed.confidence || 50)),
+      dominantEmotion: parsed.dominantEmotion || 'neutral',
+      narrativeStrength: Math.max(0, Math.min(100, parsed.narrativeStrength || 50)),
+      putCallRatio: parsed.putCallRatio && parsed.putCallRatio > 0 ? parsed.putCallRatio : undefined,
+      contrarianSignal: !!parsed.contrarianSignal,
+    };
   } catch {
-    // Failed
+    return null;
   }
-  return null;
 }
 
 // Fallback: simulated sentiment data

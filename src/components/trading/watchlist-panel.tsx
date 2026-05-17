@@ -14,6 +14,8 @@ interface WatchlistQuote {
 interface WatchlistPanelProps {
   quotes: WatchlistQuote[];
   isLoading?: boolean;
+  /** When true, render as horizontal scrollable chips for mobile */
+  compact?: boolean;
 }
 
 /**
@@ -28,9 +30,45 @@ function formatWatchlistPrice(price: number | null | undefined): string {
   return price.toFixed(6);
 }
 
-export function WatchlistPanel({ quotes, isLoading }: WatchlistPanelProps) {
+export function WatchlistPanel({ quotes, isLoading, compact }: WatchlistPanelProps) {
   const { selectedSymbol, setSelectedSymbol } = useAppStore();
 
+  // ── Compact Mode: Horizontal scrollable chips (for mobile) ──
+  if (compact) {
+    return (
+      <div className="chips-scroll">
+        {isLoading ? (
+          Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="chip chip-inactive animate-pulse" style={{ minWidth: '80px' }}>
+              ...
+            </div>
+          ))
+        ) : quotes.length === 0 ? (
+          <span className="text-[10px] text-gray-500 px-2">Cargando...</span>
+        ) : (
+          quotes.map((q) => {
+            const isSelected = q.symbol === selectedSymbol;
+            const isPositive = q.change >= 0;
+
+            return (
+              <button
+                key={q.symbol}
+                onClick={() => setSelectedSymbol(q.symbol)}
+                className={`chip ${isSelected ? 'chip-active' : 'chip-inactive'}`}
+              >
+                <span className="font-bold">{q.symbol}</span>
+                <span className={`font-mono text-[10px] ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {isPositive ? '+' : ''}{(q.changePercent ?? 0).toFixed(1)}%
+                </span>
+              </button>
+            );
+          })
+        )}
+      </div>
+    );
+  }
+
+  // ── Full Mode: Vertical list (for sidebar / drawer) ──
   return (
     <div className="space-y-0.5 sm:space-y-1 custom-scrollbar max-h-[250px] sm:max-h-[300px] overflow-y-auto">
       {isLoading ? (
@@ -51,7 +89,7 @@ export function WatchlistPanel({ quotes, isLoading }: WatchlistPanelProps) {
             <button
               key={q.symbol}
               onClick={() => setSelectedSymbol(q.symbol)}
-              className={`w-full flex items-center justify-between p-1.5 sm:p-2.5 rounded-lg transition-all text-left ${
+              className={`w-full flex items-center justify-between p-1.5 sm:p-2.5 rounded-lg transition-all text-left min-h-[44px] ${
                 isSelected
                   ? 'trading-card-accent glow-green'
                   : 'hover:bg-white/5'

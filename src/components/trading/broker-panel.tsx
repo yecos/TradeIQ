@@ -66,6 +66,7 @@ export function BrokerPanel({ config, onSave, onDisconnect }: BrokerPanelProps) 
     isPaper: config?.isPaper !== false,
   });
   const [showPositions, setShowPositions] = useState(true);
+  const [showAccountDetails, setShowAccountDetails] = useState(true);
 
   // Fetch broker data (account + positions)
   const { data: brokerData, isLoading: isLoadingBroker, refetch: refetchBroker } = useQuery({
@@ -230,7 +231,11 @@ export function BrokerPanel({ config, onSave, onDisconnect }: BrokerPanelProps) 
           {/* Account Info Card */}
           {account && (
             <div className="p-3 rounded-lg trading-card space-y-2">
-              <div className="flex items-center justify-between">
+              {/* Collapsible header on mobile */}
+              <button
+                className="w-full flex items-center justify-between md:cursor-default"
+                onClick={() => setShowAccountDetails(!showAccountDetails)}
+              >
                 <p className="text-xs font-medium text-white">Alpaca Markets</p>
                 <div className="flex items-center gap-1">
                   {config?.isPaper !== false && (
@@ -239,55 +244,65 @@ export function BrokerPanel({ config, onSave, onDisconnect }: BrokerPanelProps) 
                     </Badge>
                   )}
                   <span className="text-[9px] text-gray-500">...{config?.apiKey?.slice(-4) || '****'}</span>
+                  <span className="md:hidden ml-1">
+                    {showAccountDetails ? <ChevronUp className="w-3 h-3 text-gray-500" /> : <ChevronDown className="w-3 h-3 text-gray-500" />}
+                  </span>
                 </div>
+              </button>
+
+              {/* Equity — always visible */}
+              <div className="flex items-center justify-between">
+                <p className="text-[9px] text-gray-500">Equity</p>
+                <p className="text-xs font-mono font-bold text-white">
+                  ${account.equity.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
               </div>
 
-              {/* Key Metrics Grid */}
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <p className="text-[9px] text-gray-500">Equity</p>
-                  <p className="text-xs font-mono font-bold text-white">
-                    ${account.equity.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[9px] text-gray-500">Cash</p>
-                  <p className="text-xs font-mono text-white">
-                    ${account.cash.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[9px] text-gray-500">Buying Power</p>
-                  <p className="text-xs font-mono text-white">
-                    ${account.buyingPower.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[9px] text-gray-500">Market Value</p>
-                  <p className="text-xs font-mono text-white">
-                    ${account.longMarketValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </p>
-                </div>
-              </div>
-
-              {/* Total Unrealized P&L */}
-              {positions.length > 0 && (
-                <div className="pt-1 border-t border-white/5">
-                  <div className="flex items-center justify-between">
-                    <p className="text-[9px] text-gray-500">Unrealized P&L ({positions.length} pos.)</p>
-                    <p className={`text-xs font-mono font-bold ${totalPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(2)}
-                    </p>
+              {/* Collapsible details */}
+              {showAccountDetails && (
+                <>
+                  {/* Key Metrics Grid */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <p className="text-[9px] text-gray-500">Cash</p>
+                      <p className="text-xs font-mono text-white">
+                        ${account.cash.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[9px] text-gray-500">Buying Power</p>
+                      <p className="text-xs font-mono text-white">
+                        ${account.buyingPower.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </p>
+                    </div>
+                    <div className="col-span-2">
+                      <p className="text-[9px] text-gray-500">Market Value</p>
+                      <p className="text-xs font-mono text-white">
+                        ${account.longMarketValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </p>
+                    </div>
                   </div>
-                </div>
+
+                  {/* Total Unrealized P&L */}
+                  {positions.length > 0 && (
+                    <div className="pt-1 border-t border-white/5">
+                      <div className="flex items-center justify-between">
+                        <p className="text-[9px] text-gray-500">Unrealized P&L ({positions.length} pos.)</p>
+                        <p className={`text-xs font-mono font-bold ${totalPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                          {totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(2)}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
 
-              {/* Actions */}
+              {/* Actions — larger touch targets on mobile */}
               <div className="flex gap-2 pt-1">
                 <Button
                   size="sm"
                   variant="ghost"
-                  className="h-6 text-[10px] text-gray-400"
+                  className="h-6 sm:h-7 text-[10px] sm:text-xs text-gray-400 min-h-[44px] sm:min-h-0"
                   onClick={() => setIsEditing(true)}
                 >
                   Editar
@@ -295,7 +310,7 @@ export function BrokerPanel({ config, onSave, onDisconnect }: BrokerPanelProps) 
                 <Button
                   size="sm"
                   variant="ghost"
-                  className="h-6 text-[10px] text-red-400 hover:text-red-300"
+                  className="h-6 sm:h-7 text-[10px] sm:text-xs text-red-400 hover:text-red-300 min-h-[44px] sm:min-h-0"
                   onClick={handleDisconnect}
                 >
                   <Unlink className="w-3 h-3 mr-1" />
@@ -305,11 +320,11 @@ export function BrokerPanel({ config, onSave, onDisconnect }: BrokerPanelProps) 
             </div>
           )}
 
-          {/* Positions */}
+          {/* Positions — collapsible with larger touch targets */}
           {positions.length > 0 && (
             <div className="rounded-lg trading-card overflow-hidden">
               <button
-                className="w-full flex items-center justify-between px-3 py-2 text-xs font-medium text-gray-300 hover:bg-white/5"
+                className="w-full flex items-center justify-between px-3 py-2.5 sm:py-2 text-xs font-medium text-gray-300 hover:bg-white/5 min-h-[44px] sm:min-h-0"
                 onClick={() => setShowPositions(!showPositions)}
               >
                 <div className="flex items-center gap-1.5">
@@ -323,7 +338,7 @@ export function BrokerPanel({ config, onSave, onDisconnect }: BrokerPanelProps) 
                   {positions.map((pos) => (
                     <div
                       key={pos.symbol}
-                      className="px-3 py-2 border-b border-white/5 last:border-0 hover:bg-white/5"
+                      className="px-3 py-2.5 sm:py-2 border-b border-white/5 last:border-0 hover:bg-white/5 min-h-[44px] sm:min-h-0"
                     >
                       <div className="flex items-center justify-between mb-1">
                         <div className="flex items-center gap-1.5">
@@ -336,7 +351,7 @@ export function BrokerPanel({ config, onSave, onDisconnect }: BrokerPanelProps) 
                           <span className="text-[9px] text-gray-500">x{pos.qty}</span>
                         </div>
                         <button
-                          className="text-[9px] text-red-400/70 hover:text-red-400"
+                          className="text-[9px] sm:text-[10px] text-red-400/70 hover:text-red-400 min-h-[44px] sm:min-h-0 flex items-center"
                           onClick={() => closePositionMutation.mutate(pos.symbol)}
                           disabled={closePositionMutation.isPending}
                         >
@@ -366,46 +381,46 @@ export function BrokerPanel({ config, onSave, onDisconnect }: BrokerPanelProps) 
         </>
       ) : isEditing || !isConnected ? (
         /* Connection Form */
-        <div className="p-3 rounded-lg trading-card space-y-2">
+        <div className="p-3 sm:p-4 rounded-lg trading-card space-y-2">
           {!isConnected && (
             <div className="flex items-start gap-1.5 p-2 rounded bg-yellow-500/10 border border-yellow-500/20">
               <AlertTriangle className="w-3 h-3 text-yellow-400 mt-0.5 flex-shrink-0" />
-              <p className="text-[9px] text-yellow-300">
+              <p className="text-[9px] sm:text-[10px] text-yellow-300">
                 Conecta tu cuenta de Alpaca para operar. Paper trading es recomendado para pruebas.
               </p>
             </div>
           )}
           <div>
-            <Label className="text-[10px] text-gray-400">API Key</Label>
+            <Label className="text-[10px] sm:text-xs text-gray-400">API Key</Label>
             <Input
-              className="h-7 text-xs bg-white/5 border-white/10"
+              className="h-8 sm:h-7 text-xs bg-white/5 border-white/10"
               placeholder="PK..."
               value={form.apiKey}
               onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
             />
           </div>
           <div>
-            <Label className="text-[10px] text-gray-400">API Secret</Label>
+            <Label className="text-[10px] sm:text-xs text-gray-400">API Secret</Label>
             <Input
               type="password"
-              className="h-7 text-xs bg-white/5 border-white/10"
+              className="h-8 sm:h-7 text-xs bg-white/5 border-white/10"
               placeholder="••••••••"
               value={form.apiSecret}
               onChange={(e) => setForm({ ...form, apiSecret: e.target.value })}
             />
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 min-h-[44px]">
             <Switch
               checked={form.isPaper}
               onCheckedChange={(checked) => setForm({ ...form, isPaper: checked })}
-              className="data-[state=checked]:bg-emerald-600 scale-75"
+              className="data-[state=checked]:bg-emerald-600 scale-75 sm:scale-75"
             />
-            <span className="text-[10px] text-gray-400">Paper Trading (Recomendado)</span>
+            <span className="text-[10px] sm:text-xs text-gray-400">Paper Trading (Recomendado)</span>
           </div>
           {!form.isPaper && (
             <div className="flex items-start gap-1.5 p-2 rounded bg-red-500/10 border border-red-500/20">
               <AlertTriangle className="w-3 h-3 text-red-400 mt-0.5 flex-shrink-0" />
-              <p className="text-[9px] text-red-300">
+              <p className="text-[9px] sm:text-[10px] text-red-300">
                 LIVE TRADING — Dinero real en juego. Solo usa esta opción si tienes experiencia.
               </p>
             </div>
@@ -413,7 +428,7 @@ export function BrokerPanel({ config, onSave, onDisconnect }: BrokerPanelProps) 
           <div className="flex gap-2">
             <Button
               size="sm"
-              className="flex-1 h-7 text-xs bg-emerald-600 hover:bg-emerald-700"
+              className="flex-1 h-8 sm:h-7 text-xs bg-emerald-600 hover:bg-emerald-700 min-h-[44px] sm:min-h-0"
               onClick={handleSave}
               disabled={!form.apiKey || !form.apiSecret || connectMutation.isPending}
             >
@@ -426,7 +441,7 @@ export function BrokerPanel({ config, onSave, onDisconnect }: BrokerPanelProps) 
               <Button
                 size="sm"
                 variant="ghost"
-                className="h-7 text-xs text-gray-400"
+                className="h-8 sm:h-7 text-xs text-gray-400 min-h-[44px] sm:min-h-0"
                 onClick={() => setIsEditing(false)}
               >
                 Cancelar

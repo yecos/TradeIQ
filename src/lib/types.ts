@@ -77,7 +77,7 @@ export interface AccountSnapshot {
 }
 
 // Vector Types
-export type VectorCategory = 'technical' | 'pattern' | 'volume' | 'news' | 'sentiment' | 'macro';
+export type VectorCategory = 'technical' | 'pattern' | 'volume' | 'news' | 'sentiment' | 'macro' | 'orderflow';
 
 export interface VectorDefinition {
   id: string;
@@ -177,6 +177,38 @@ export interface TimeframeRecommendation {
   reasoning: string[];
 }
 
+// Multi-Timeframe Analysis Types
+export interface TimeframeConfig {
+  label: string;
+  interval: string;
+  weight: number;
+  role: 'trend' | 'confirmation' | 'entry';
+  candleCount: number;
+}
+
+export interface TimeframeAnalysis {
+  timeframe: string;
+  label: string;
+  role: 'trend' | 'confirmation' | 'entry';
+  weight: number;
+  technical: TechnicalAnalysis | null;
+  direction: 'LONG' | 'SHORT' | 'NEUTRAL';
+  strength: number;
+  confidence: number;
+}
+
+export interface MultiTimeframeResult {
+  timeframes: TimeframeAnalysis[];
+  trendDirection: 'LONG' | 'SHORT' | 'NEUTRAL';
+  entryDirection: 'LONG' | 'SHORT' | 'NEUTRAL';
+  overallDirection: 'LONG' | 'SHORT' | 'NEUTRAL';
+  alignment: number;
+  trendStrength: number;
+  entryPrecision: number;
+  signals: VectorSignal[];
+  recommendation: string;
+}
+
 // Confluence Engine Types
 export interface ConfluenceResult {
   symbol: string;
@@ -190,6 +222,50 @@ export interface ConfluenceResult {
   recommendation: string;
   timeframeRecommendation?: TimeframeRecommendation;
   timestamp: number;
+}
+
+// Order Flow Types
+export interface OrderBookLevel {
+  price: number;
+  quantity: number;
+  total: number;
+}
+
+export interface OrderBookSnapshot {
+  bids: OrderBookLevel[];
+  asks: OrderBookLevel[];
+  spread: number;
+  spreadPercent: number;
+  bidDepth: number;
+  askDepth: number;
+  imbalance: number;
+  timestamp: number;
+}
+
+export interface TradeFlow {
+  buys: number;
+  sells: number;
+  buyVolume: number;
+  sellVolume: number;
+  delta: number;
+  cumulativeDelta: number;
+  largeBuys: number;
+  largeSells: number;
+}
+
+export interface AbsorptionEvent {
+  type: 'bid_absorption' | 'ask_absorption';
+  priceLevel: number;
+  volume: number;
+  description: string;
+}
+
+export interface OrderFlowResult {
+  orderBook: OrderBookSnapshot | null;
+  tradeFlow: TradeFlow;
+  absorptionEvents: AbsorptionEvent[];
+  signals: VectorSignal[];
+  source: 'real' | 'simulated';
 }
 
 // Broker Types

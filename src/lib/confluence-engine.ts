@@ -1,4 +1,5 @@
-import type { Candle, VectorSignal, ConfluenceResult, TechnicalAnalysis, PatternAnalysis, VolumeAnalysis, NewsAnalysis, SentimentAnalysis, MacroAnalysis } from './types';
+import type { Candle, VectorSignal, ConfluenceResult, TechnicalAnalysis, PatternAnalysis, VolumeAnalysis, NewsAnalysis, SentimentAnalysis, MacroAnalysis, MultiTimeframeResult, OrderFlowResult } from './types';
+import { analyzeOrderFlow } from './analysis/order-flow';
 import { analyzeTechnical } from './technical-analysis';
 import { detectPatterns } from './pattern-detection';
 import { analyzeVolume } from './volume-analysis';
@@ -24,6 +25,8 @@ export async function generateConfluence(
     news?: NewsAnalysis | null;
     sentiment?: SentimentAnalysis | null;
     macro?: MacroAnalysis | null;
+    multiTimeframe?: MultiTimeframeResult | null;
+    orderFlow?: OrderFlowResult | null;
   }
 ): Promise<ConfluenceResult> {
   const allSignals: VectorSignal[] = [];
@@ -105,6 +108,32 @@ export async function generateConfluence(
     allSignals.push(...macro.signals
       .filter(s => s.direction !== 'NEUTRAL')
       .map(s => ({ ...s, strength: Math.round(s.strength * weight) }))
+    );
+  }
+
+  // Multi-timeframe signals (if available)
+  if (precomputed?.multiTimeframe) {
+    const mtfWeight = 1.4;
+    allSignals.push(...precomputed.multiTimeframe.signals
+      .filter(s => s.direction !== 'NEUTRAL')
+      .map(s => ({ ...s, strength: Math.round(s.strength * mtfWeight) }))
+    );
+  }
+
+  // Order flow signals (if available)
+  let orderFlow = precomputed?.orderFlow ?? null;
+  if (enabledVectors.includes('orderflow') && !orderFlow) {
+    try {
+      orderFlow = await analyzeOrderFlow(symbol);
+    } catch {
+      // Order flow analysis failed, skip
+    }
+  }
+  if (orderFlow) {
+    const ofWeight = weightMap.get('orderflow') ?? 1.1;
+    allSignals.push(...orderFlow.signals
+      .filter(s => s.direction !== 'NEUTRAL')
+      .map(s => ({ ...s, strength: Math.round(s.strength * ofWeight) }))
     );
   }
 

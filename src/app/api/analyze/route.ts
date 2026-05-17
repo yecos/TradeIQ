@@ -7,11 +7,12 @@ import { analyzeVolume } from '@/lib/volume-analysis';
 import { analyzeNews } from '@/lib/news-analysis';
 import { analyzeSentiment } from '@/lib/sentiment-analysis';
 import { analyzeMacro } from '@/lib/macro-analysis';
+import { analyzeMultiTimeframe, DEFAULT_TIMEFRAMES } from '@/lib/analysis/multi-timeframe';
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { symbol, vectors } = body;
+    const { symbol, vectors, timeframes } = body;
 
     if (!symbol) {
       return NextResponse.json({ error: 'Symbol is required' }, { status: 400 });
@@ -21,7 +22,7 @@ export async function POST(request: NextRequest) {
 
     // Hard timeout to prevent serverless function timeout
     const result = await Promise.race([
-      runAnalysis(symbol, enabledVectors),
+      runAnalysis(symbol, enabledVectors, timeframes),
       new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('Analysis timed out')), 15000)
       ),
@@ -34,7 +35,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-async function runAnalysis(symbol: string, enabledVectors: string[]) {
+async function runAnalysis(symbol: string, enabledVectors: string[], timeframes?: string[]) {
   const candles = await getCandles(symbol, 180);
 
   if (candles.length < 30) {
@@ -64,6 +65,29 @@ async function runAnalysis(symbol: string, enabledVectors: string[]) {
       : Promise.resolve(null),
   ]);
 
+  // Multi-timeframe analysis (if requested)
+  let multiTimeframe = null;
+  if (timeframes && timeframes.length > 0) {
+    try {
+      const selectedTFs = DEFAULT_TIMEFRAMES.filter(tf => timeframes.includes(tf.label));
+      if (selectedTFs.length > 0) {
+        const tfData = await Promise.all(
+          selectedTFs.map(async (tf) => {
+            const tfCandles = await getCandles(symbol, tf.candleCount, tf.interval);
+            return { timeframe: tf.label, candles: tfCandles, config: tf };
+          })
+        );
+
+        const validTFData = tfData.filter(d => d.candles.length >= 20);
+        if (validTFData.length > 0) {
+          multiTimeframe = analyzeMultiTimeframe(validTFData);
+        }
+      }
+    } catch (error) {
+      console.warn('[TradeIQ] Multi-timeframe analysis failed:', error);
+    }
+  }
+
   // Generate confluence — pass precomputed results (no double computation)
   const confluence = await generateConfluence(candles, symbol, enabledVectors, {
     technical,
@@ -72,6 +96,7 @@ async function runAnalysis(symbol: string, enabledVectors: string[]) {
     news,
     sentiment,
     macro,
+    multiTimeframe,
   });
 
   return {
@@ -82,6 +107,7 @@ async function runAnalysis(symbol: string, enabledVectors: string[]) {
     news,
     sentiment,
     macro,
+    multiTimeframe,
     confluence,
     timestamp: Date.now(),
   };

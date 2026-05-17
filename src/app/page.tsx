@@ -13,6 +13,7 @@ import { BrokerPanel } from '@/components/trading/broker-panel';
 import { BacktestPanel } from '@/components/trading/backtest-panel';
 import { PortfolioPanel } from '@/components/trading/portfolio-panel';
 import { AlertPanel } from '@/components/trading/alert-panel';
+import { MobileNav } from '@/components/trading/mobile-nav';
 import type { Candle, Quote, TechnicalAnalysis, PatternAnalysis, VolumeAnalysis, NewsAnalysis, SentimentAnalysis, MacroAnalysis, ConfluenceResult } from '@/lib/types';
 import type { WSConnectionState } from '@/lib/data/binance-ws';
 import { Button } from '@/components/ui/button';
@@ -84,6 +85,7 @@ export default function TradeIQDashboard() {
   // Journal entries are now managed by JournalPanel via useJournal hook
   const [brokerConfig, setBrokerConfig] = useState<BrokerConfig | null>(null);
   const [activeTab, setActiveTab] = useState('analysis');
+  const [mobileTab, setMobileTab] = useState('chart');
   const [searchSymbol, setSearchSymbol] = useState('');
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
@@ -445,7 +447,7 @@ export default function TradeIQDashboard() {
     </Tabs>
   );
 
-  // Shared left sidebar content
+  // Shared left sidebar content (full mode — vertical list)
   const leftSidebarContent = (
     <>
       {/* Watchlist */}
@@ -470,6 +472,127 @@ export default function TradeIQDashboard() {
         <VectorPanel />
       </div>
     </>
+  );
+
+  // ── Mobile Tab Views ──
+  // On mobile, the bottom nav controls which view is shown.
+  // Each view is full-screen with bottom padding for the nav bar.
+
+  const mobileChartView = (
+    <div className="flex flex-col h-full mb-safe-nav">
+      {/* Watchlist Chips — mobile only */}
+      <div className="px-2 pt-2 pb-1 border-b border-white/5">
+        <WatchlistPanel quotes={quotes} isLoading={isLoadingQuotes} compact />
+      </div>
+      {/* Chart area — takes remaining space */}
+      <div className="flex-1 p-1.5 min-h-0 flex flex-col">
+        {/* Timeframe Bar */}
+        <div className="flex items-center gap-1 mb-1 px-1 overflow-x-auto">
+          <Clock className="w-3 h-3 text-gray-500 mr-1 flex-shrink-0" />
+          {(['1m', '5m', '15m', '1H', '4H', '1D', '1W'] as const).map((tf) => (
+            <button
+              key={tf}
+              onClick={() => setTimeframe(tf)}
+              className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors flex-shrink-0 min-h-[36px] ${
+                timeframe === tf
+                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                  : 'text-gray-500 hover:text-gray-300 hover:bg-white/5 border border-transparent'
+              }`}
+            >
+              {tf}
+            </button>
+          ))}
+        </div>
+        {/* Chart Container */}
+        <div className="flex-1 rounded-lg overflow-hidden trading-card min-h-0">
+          <TradingChart candles={candles} symbol={selectedSymbol} timeframe={timeframe} onWSStateChange={handleWSStateChange} />
+        </div>
+      </div>
+      {/* Bottom Analysis Summary Bar (mobile) */}
+      {activeConfluence && (
+        <div className="h-14 border-t border-white/5 px-3 flex items-center gap-4 flex-shrink-0 overflow-x-auto">
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            {activeConfluence.overallDirection === 'LONG' ? (
+              <TrendingUp className="w-4 h-4 text-emerald-400" />
+            ) : activeConfluence.overallDirection === 'SHORT' ? (
+              <TrendingUp className="w-4 h-4 text-red-400 rotate-180" />
+            ) : (
+              <BarChart3 className="w-4 h-4 text-yellow-400" />
+            )}
+            <span className="text-xs font-bold">
+              {activeConfluence.overallDirection === 'LONG' ? 'ALCISTA' :
+               activeConfluence.overallDirection === 'SHORT' ? 'BAJISTA' : 'NEUTRAL'}
+            </span>
+          </div>
+          <span className={`text-sm font-bold font-mono ${
+            activeConfluence.confluenceScore >= 70 ? 'text-emerald-400' :
+            activeConfluence.confluenceScore >= 40 ? 'text-yellow-400' : 'text-gray-400'
+          }`}>
+            {activeConfluence.confluenceScore}%
+          </span>
+          <span className="text-xs font-mono text-white">
+            R:B {(activeConfluence.riskReward ?? 0).toFixed(2)}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+
+  const mobileAnalysisView = (
+    <div className="h-full overflow-y-auto custom-scrollbar p-3 mb-safe-nav space-y-3">
+      {/* Vector Selector */}
+      <VectorPanel />
+      {/* Analysis */}
+      <AnalysisPanel
+        technical={activeTechnical}
+        patterns={activePatterns}
+        volume={activeVolume}
+        confluence={activeConfluence}
+        news={activeNews}
+        sentiment={activeSentiment}
+        macro={activeMacro}
+      />
+      {/* Signals */}
+      <div>
+        <div className="flex items-center gap-1.5 mb-2">
+          <Zap className="w-3.5 h-3.5 text-gray-400" />
+          <span className="text-xs font-semibold text-gray-300">Señales</span>
+          {signals.length > 0 && (
+            <Badge className="text-[9px] border-0 bg-emerald-500/20 text-emerald-400">{signals.length}</Badge>
+          )}
+        </div>
+        {signals.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-6 text-gray-500">
+            <Zap className="w-6 h-6 mb-2 opacity-50" />
+            <p className="text-[10px]">Ejecuta un análisis para ver señales</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {signals.map((signal, i) => (
+              <SignalCard key={i} signal={signal} onSave={saveSignal} brokerConnected={brokerConfig?.isActive} />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  const mobilePortfolioView = (
+    <div className="h-full overflow-y-auto custom-scrollbar p-3 mb-safe-nav space-y-3">
+      <PortfolioPanel brokerConnected={brokerConfig?.isActive ?? false} />
+      <JournalPanel />
+    </div>
+  );
+
+  const mobileSettingsView = (
+    <div className="h-full overflow-y-auto custom-scrollbar p-3 mb-safe-nav space-y-3">
+      <BrokerPanel
+        config={brokerConfig}
+        onSave={saveBrokerConfig}
+        onDisconnect={disconnectBroker}
+      />
+      <AlertPanel watchlist={watchlist} brokerConnected={brokerConfig?.isActive ?? false} />
+    </div>
   );
 
   return (
@@ -666,23 +789,33 @@ export default function TradeIQDashboard() {
 
       {/* ===== MAIN CONTENT ===== */}
       <div className="flex-1 flex overflow-hidden">
-        {/* LEFT SIDEBAR — Desktop only */}
+
+        {/* ── MOBILE LAYOUT (< md) ── */}
+        <div className="flex-1 md:hidden overflow-hidden">
+          {mobileTab === 'chart' && mobileChartView}
+          {mobileTab === 'analysis' && mobileAnalysisView}
+          {mobileTab === 'portfolio' && mobilePortfolioView}
+          {mobileTab === 'settings' && mobileSettingsView}
+        </div>
+
+        {/* ── DESKTOP LAYOUT (≥ md) ── */}
+        {/* LEFT SIDEBAR */}
         <aside className="hidden md:flex w-56 border-r border-white/5 flex-col overflow-hidden flex-shrink-0">
           {leftSidebarContent}
         </aside>
 
         {/* CENTER — CHART */}
-        <main className="flex-1 flex flex-col overflow-hidden">
+        <main className="hidden md:flex md:flex-1 md:flex-col md:overflow-hidden">
           {/* Timeframe Selector + Chart */}
-          <div className="flex-1 p-1.5 sm:p-2 min-h-0 flex flex-col">
+          <div className="flex-1 p-2 min-h-0 flex flex-col">
             {/* Timeframe Bar */}
-            <div className="flex items-center gap-0.5 sm:gap-1 mb-1 px-1 overflow-x-auto">
+            <div className="flex items-center gap-1 mb-1 px-1 overflow-x-auto">
               <Clock className="w-3 h-3 text-gray-500 mr-1 flex-shrink-0" />
               {(['1m', '5m', '15m', '1H', '4H', '1D', '1W'] as const).map((tf) => (
                 <button
                   key={tf}
                   onClick={() => setTimeframe(tf)}
-                  className={`px-1.5 sm:px-2 py-0.5 text-[10px] font-medium rounded transition-colors flex-shrink-0 ${
+                  className={`px-2 py-0.5 text-[10px] font-medium rounded transition-colors flex-shrink-0 ${
                     timeframe === tf
                       ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                       : 'text-gray-500 hover:text-gray-300 hover:bg-white/5 border border-transparent'
@@ -692,7 +825,7 @@ export default function TradeIQDashboard() {
                 </button>
               ))}
               {/* OHLC — desktop only */}
-              <div className="ml-auto hidden md:flex items-center gap-2">
+              <div className="ml-auto flex items-center gap-2">
                 {currentQuote && currentQuote.price != null && (
                   <span className="text-[10px] text-gray-500">
                     O: <span className="text-gray-300">${(currentQuote.open ?? 0) >= 1 ? (currentQuote.open ?? 0).toFixed(2) : (currentQuote.open ?? 0).toFixed(4)}</span>
@@ -709,73 +842,73 @@ export default function TradeIQDashboard() {
             </div>
           </div>
 
-          {/* Bottom Analysis Summary Bar */}
+          {/* Bottom Analysis Summary Bar — desktop only */}
           {activeConfluence && (
-            <div className="h-14 sm:h-16 border-t border-white/5 px-2 sm:px-4 flex items-center gap-3 sm:gap-6 flex-shrink-0 overflow-x-auto">
+            <div className="h-16 border-t border-white/5 px-4 flex items-center gap-6 flex-shrink-0 overflow-x-auto">
               {/* Direction */}
-              <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
+              <div className="flex items-center gap-2 flex-shrink-0">
                 {activeConfluence.overallDirection === 'LONG' ? (
-                  <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400" />
+                  <TrendingUp className="w-5 h-5 text-emerald-400" />
                 ) : activeConfluence.overallDirection === 'SHORT' ? (
-                  <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-red-400 rotate-180" />
+                  <TrendingUp className="w-5 h-5 text-red-400 rotate-180" />
                 ) : (
-                  <BarChart3 className="w-4 h-4 sm:w-5 sm:h-5 text-yellow-400" />
+                  <BarChart3 className="w-5 h-5 text-yellow-400" />
                 )}
                 <div>
-                  <p className="text-[10px] sm:text-xs font-bold">
+                  <p className="text-xs font-bold">
                     {activeConfluence.overallDirection === 'LONG' ? 'ALCISTA' :
                      activeConfluence.overallDirection === 'SHORT' ? 'BAJISTA' : 'NEUTRAL'}
                   </p>
-                  <p className="text-[8px] sm:text-[10px] text-gray-500">Dirección</p>
+                  <p className="text-[10px] text-gray-500">Dirección</p>
                 </div>
               </div>
 
               {/* Confluence Score */}
               <div className="flex-shrink-0">
-                <p className={`text-sm sm:text-lg font-bold font-mono ${
+                <p className={`text-lg font-bold font-mono ${
                   activeConfluence.confluenceScore >= 70 ? 'text-emerald-400' :
                   activeConfluence.confluenceScore >= 40 ? 'text-yellow-400' : 'text-gray-400'
                 }`}>
                   {activeConfluence.confluenceScore}%
                 </p>
-                <p className="text-[8px] sm:text-[10px] text-gray-500">Confluencia</p>
+                <p className="text-[10px] text-gray-500">Confluencia</p>
               </div>
 
               {/* R:R */}
               <div className="flex-shrink-0">
-                <p className="text-xs sm:text-sm font-bold font-mono text-white">
+                <p className="text-sm font-bold font-mono text-white">
                   {(activeConfluence.riskReward ?? 0).toFixed(2)}
                 </p>
-                <p className="text-[8px] sm:text-[10px] text-gray-500">R:B</p>
+                <p className="text-[10px] text-gray-500">R:B</p>
               </div>
 
               {/* Entry */}
-              <div className="flex-shrink-0 hidden xs:block">
-                <p className="text-xs sm:text-sm font-mono text-white">${(activeConfluence.entryPrice ?? 0).toFixed(2)}</p>
-                <p className="text-[8px] sm:text-[10px] text-gray-500">Entrada</p>
+              <div className="flex-shrink-0">
+                <p className="text-sm font-mono text-white">${(activeConfluence.entryPrice ?? 0).toFixed(2)}</p>
+                <p className="text-[10px] text-gray-500">Entrada</p>
               </div>
 
               {/* SL */}
-              <div className="flex-shrink-0 hidden sm:block">
-                <p className="text-xs sm:text-sm font-mono text-red-400">${(activeConfluence.stopLoss ?? 0).toFixed(2)}</p>
-                <p className="text-[8px] sm:text-[10px] text-gray-500">SL</p>
+              <div className="flex-shrink-0">
+                <p className="text-sm font-mono text-red-400">${(activeConfluence.stopLoss ?? 0).toFixed(2)}</p>
+                <p className="text-[10px] text-gray-500">SL</p>
               </div>
 
               {/* TP */}
-              <div className="flex-shrink-0 hidden sm:block">
-                <p className="text-xs sm:text-sm font-mono text-emerald-400">${(activeConfluence.takeProfit ?? 0).toFixed(2)}</p>
-                <p className="text-[8px] sm:text-[10px] text-gray-500">TP</p>
+              <div className="flex-shrink-0">
+                <p className="text-sm font-mono text-emerald-400">${(activeConfluence.takeProfit ?? 0).toFixed(2)}</p>
+                <p className="text-[10px] text-gray-500">TP</p>
               </div>
 
               {/* Timeframe Recommendation */}
               {activeConfluence.timeframeRecommendation && (
-                <div className="flex-shrink-0 hidden sm:block border-l border-white/10 pl-3 ml-1">
+                <div className="flex-shrink-0 border-l border-white/10 pl-3 ml-1">
                   <div className="flex items-center gap-1">
                     <Clock className="w-3 h-3 text-gray-500" />
-                    <span className="text-[9px] sm:text-[10px] font-bold text-white">
+                    <span className="text-[10px] font-bold text-white">
                       {activeConfluence.timeframeRecommendation.strategyLabel}
                     </span>
-                    <span className="text-[8px] sm:text-[9px] text-gray-400">
+                    <span className="text-[9px] text-gray-400">
                       {activeConfluence.timeframeRecommendation.estimatedDuration}
                     </span>
                   </div>
@@ -784,15 +917,15 @@ export default function TradeIQDashboard() {
                       activeConfluence.timeframeRecommendation.conviction === 'high' ? 'bg-emerald-400' :
                       activeConfluence.timeframeRecommendation.conviction === 'medium' ? 'bg-yellow-400' : 'bg-red-400'
                     }`} />
-                    <p className="text-[8px] sm:text-[9px] text-gray-500">
+                    <p className="text-[9px] text-gray-500">
                       Convicción {activeConfluence.timeframeRecommendation.convictionLabel}
                     </p>
                   </div>
                 </div>
               )}
 
-              {/* Active Vectors — desktop only */}
-              <div className="ml-auto hidden md:block">
+              {/* Active Vectors */}
+              <div className="ml-auto">
                 <div className="flex items-center gap-1">
                   {activeConfluence.vectorSignals.map((s, i) => (
                     <div
@@ -817,7 +950,10 @@ export default function TradeIQDashboard() {
         </aside>
       </div>
 
-      {/* ===== MOBILE DRAWERS ===== */}
+      {/* ===== MOBILE BOTTOM NAV ===== */}
+      <MobileNav activeTab={mobileTab} onTabChange={setMobileTab} />
+
+      {/* ===== MOBILE DRAWERS (kept for compatibility) ===== */}
 
       {/* Watchlist Drawer (left side) */}
       {showWatchlistDrawer && (

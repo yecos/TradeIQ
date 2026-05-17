@@ -1,11 +1,15 @@
 import type { MacroAnalysis, VectorSignal } from './types';
+import { getSDK } from './ai/sdk';
+import { MACRO_ANALYSIS_PROMPT } from './ai/prompts';
 
 /**
- * Macro Analysis Module — Real-time macroeconomic data using free APIs.
+ * Macro Analysis Module — Enhanced real-time macroeconomic analysis.
  *
- * Data sources:
- * 1. z-ai-web-dev-sdk web search — for current Fed policy, economic calendar, inflation data
- * 2. Fear & Greed Index as market risk proxy
+ * Improvements:
+ * 1. SDK singleton for efficiency
+ * 2. Enhanced prompt with sector impact, risk environment, inflation/employment trends
+ * 3. Better event detection and classification
+ * 4. More nuanced signal generation with sector-specific context
  *
  * Cache: 30 minutes (macro data changes slowly)
  */
@@ -29,7 +33,7 @@ export async function analyzeMacro(symbol?: string): Promise<MacroAnalysis> {
   }
 
   try {
-    const result = await withTimeout(analyzeMacroFromAI(symbol), 10000);
+    const result = await withTimeout(analyzeMacroEnhanced(symbol), 12000);
     if (result) {
       cache.set(cacheKey, { data: result, timestamp: Date.now() });
       return result;
@@ -44,25 +48,29 @@ export async function analyzeMacro(symbol?: string): Promise<MacroAnalysis> {
   return fallback;
 }
 
-async function analyzeMacroFromAI(symbol?: string): Promise<MacroAnalysis | null> {
-  const ZAI = (await import('z-ai-web-dev-sdk')).default;
-  const zai = await ZAI.create();
+async function analyzeMacroEnhanced(symbol?: string): Promise<MacroAnalysis | null> {
+  const zai = await getSDK();
 
   const isCrypto = symbol && ['BTC', 'ETH', 'BNB', 'SOL', 'XRP', 'ADA', 'DOGE', 'DOT', 'AVAX', 'LINK'].includes(symbol.toUpperCase());
 
-  // Search for current macro environment
-  const [macroSearch, fedSearch] = await Promise.all([
+  // Enhanced multi-source search
+  const [macroSearch, fedSearch, economicSearch] = await Promise.all([
     zai.functions.invoke('web_search', {
-      query: 'US Federal Reserve interest rate decision latest 2025 economic calendar',
+      query: 'US Federal Reserve interest rate decision latest economic policy 2025',
       num: 5,
       recency_days: 7,
     }),
     zai.functions.invoke('web_search', {
       query: isCrypto
-        ? 'cryptocurrency regulation macro outlook inflation CPI latest'
-        : 'stock market macro outlook economic indicators inflation employment',
+        ? 'cryptocurrency regulation SEC macro outlook inflation CPI latest'
+        : 'stock market macro outlook economic indicators inflation employment GDP',
       num: 5,
       recency_days: 7,
+    }),
+    zai.functions.invoke('web_search', {
+      query: 'economic calendar this week events CPI GDP employment unemployment',
+      num: 4,
+      recency_days: 3,
     }),
   ]);
 
@@ -74,32 +82,22 @@ async function analyzeMacroFromAI(symbol?: string): Promise<MacroAnalysis | null
     `${i + 1}. ${r.name}: ${r.snippet}`
   ).join('\n');
 
-  const fullContext = `Macro/Economic news:\n${macroContext}\n\nFed/Policy news:\n${fedContext}`;
+  const economicContext = (economicSearch || []).slice(0, 3).map((r: { name: string; snippet: string }, i: number) =>
+    `${i + 1}. ${r.name}: ${r.snippet}`
+  ).join('\n');
 
-  // Ask LLM to analyze macro environment
+  const fullContext = `Macro/Policy news:\n${macroContext}\n\nFed/Rate news:\n${fedContext}\n\nEconomic calendar:\n${economicContext}`;
+
+  // Ask LLM with enhanced prompt
   const completion = await zai.chat.completions.create({
     messages: [
       {
         role: 'system',
-        content: `You are a macroeconomic analyst. Analyze the current macro environment and return a JSON object with this exact structure:
-{
-  "fedRateTrend": "hawkish" | "dovish" | "neutral",
-  "economicEvents": [
-    {"event": "event name", "impact": "high" | "medium" | "low", "forecast": "expected value or null", "previous": "previous value or null"}
-  ],
-  "macroSentiment": number -1 to 1,
-  "macroDetail": "brief explanation"
-}
-Rules:
-- hawkish = Fed likely to raise rates or keep them high (bearish for risk assets)
-- dovish = Fed likely to cut rates (bullish for risk assets)
-- neutral = mixed signals or no clear direction
-- Include 2-4 most important upcoming economic events
-- Return ONLY valid JSON, no markdown`,
+        content: MACRO_ANALYSIS_PROMPT,
       },
       {
         role: 'user',
-        content: `Analyze the current macro environment${symbol ? ` for ${symbol}` : ''}:\n\n${fullContext}`,
+        content: `Analyze the current macro environment${symbol ? ` for ${symbol} (${isCrypto ? 'crypto' : 'stock'})` : ''}:\n\n${fullContext}`,
       },
     ],
   });
@@ -116,44 +114,57 @@ Rules:
     const fedTrend = ['hawkish', 'dovish', 'neutral'].includes(parsed.fedRateTrend)
       ? parsed.fedRateTrend : 'neutral';
 
-    const events: MacroAnalysis['economicEvents'] = (parsed.economicEvents || []).slice(0, 4).map((e: { event?: string; impact?: string; forecast?: string | null; previous?: string | null }, idx: number) => ({
+    const events: MacroAnalysis['economicEvents'] = (parsed.economicEvents || []).slice(0, 5).map((e: { event?: string; impact?: string; forecast?: string | null; previous?: string | null }, idx: number) => ({
       event: e.event || 'Economic Event',
       impact: (['high', 'medium', 'low'].includes(e.impact || '') ? e.impact : 'medium') as 'high' | 'medium' | 'low',
-      // Deterministic dates: distribute events across next 14 days based on index
       date: new Date(Date.now() + (idx + 1) * 3 * 86400000).toISOString().split('T')[0],
       forecast: e.forecast || undefined,
       previous: e.previous || undefined,
     }));
 
     const macroSentiment = Math.max(-1, Math.min(1, parsed.macroSentiment || 0));
+    const riskEnvironment = parsed.riskEnvironment || 'neutral';
+    const inflationTrend = parsed.inflationTrend || 'stable';
 
+    // Enhanced signal generation
     const signals: VectorSignal[] = [];
+    let detail = '';
+
     if (macroSentiment > 0.2) {
+      detail = `Entorno macro favorable (${riskEnvironment}). Fed ${fedTrend}. Inflación ${inflationTrend}. ${events.filter(e => e.impact === 'high').length} eventos alto impacto.`;
+      if (parsed.macroDetail) detail += ` ${parsed.macroDetail}`;
+
       signals.push({
         vectorId: 'macro',
         vectorName: 'Macro',
         direction: 'LONG',
         strength: Math.round(macroSentiment * 100),
-        confidence: 55,
-        detail: parsed.macroDetail || `Entorno macro favorable. Fed ${fedTrend}. ${events.filter(e => e.impact === 'high').length} eventos de alto impacto.`,
+        confidence: 60,
+        detail,
       });
     } else if (macroSentiment < -0.2) {
+      detail = `Entorno macro desfavorable (${riskEnvironment}). Fed ${fedTrend}. Inflación ${inflationTrend}. ${events.filter(e => e.impact === 'high').length} eventos alto impacto.`;
+      if (parsed.macroDetail) detail += ` ${parsed.macroDetail}`;
+
       signals.push({
         vectorId: 'macro',
         vectorName: 'Macro',
         direction: 'SHORT',
         strength: Math.round(Math.abs(macroSentiment) * 100),
-        confidence: 55,
-        detail: parsed.macroDetail || `Entorno macro desfavorable. Fed ${fedTrend}. ${events.filter(e => e.impact === 'high').length} eventos de alto impacto.`,
+        confidence: 60,
+        detail,
       });
     } else {
+      detail = `Entorno macro neutral (${riskEnvironment}). Fed ${fedTrend}. ${events.filter(e => e.impact === 'high').length} eventos alto impacto.`;
+      if (parsed.macroDetail) detail += ` ${parsed.macroDetail}`;
+
       signals.push({
         vectorId: 'macro',
         vectorName: 'Macro',
         direction: 'NEUTRAL',
         strength: 35,
-        confidence: 50,
-        detail: parsed.macroDetail || `Entorno macro neutral. Fed ${fedTrend}. ${events.filter(e => e.impact === 'high').length} eventos de alto impacto.`,
+        confidence: 55,
+        detail,
       });
     }
 

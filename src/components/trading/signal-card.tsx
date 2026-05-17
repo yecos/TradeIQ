@@ -100,18 +100,18 @@ export function SignalCard({ signal, onSave, onExecute, brokerConnected = false 
 
   return (
     <div
-      className={`p-3 rounded-lg trading-card ${
+      className={`p-3 sm:p-4 rounded-lg trading-card ${
         isLong ? 'signal-long' : isShort ? 'signal-short' : 'signal-neutral'
       }`}
     >
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           {isLong ? (
-            <ArrowUpCircle className="w-4 h-4 text-emerald-400" />
+            <ArrowUpCircle className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400" />
           ) : isShort ? (
-            <ArrowDownCircle className="w-4 h-4 text-red-400" />
+            <ArrowDownCircle className="w-4 h-4 sm:w-5 sm:h-5 text-red-400" />
           ) : (
-            <MinusCircle className="w-4 h-4 text-yellow-400" />
+            <MinusCircle className="w-4 h-4 sm:w-5 sm:h-5 text-yellow-400" />
           )}
           <span className="font-bold text-sm text-white">{signal.symbol}</span>
           <Badge
@@ -127,7 +127,7 @@ export function SignalCard({ signal, onSave, onExecute, brokerConnected = false 
           </Badge>
         </div>
         <Badge
-          className={`text-[10px] border-0 ${
+          className={`text-[10px] border-0 hidden sm:inline-flex ${
             signal.confluenceScore >= 70
               ? 'bg-emerald-500/20 text-emerald-300'
               : signal.confluenceScore >= 40
@@ -137,9 +137,20 @@ export function SignalCard({ signal, onSave, onExecute, brokerConnected = false 
         >
           {signal.confluenceScore}% confluencia
         </Badge>
+        <span
+          className={`text-xs font-bold font-mono sm:hidden ${
+            signal.confluenceScore >= 70
+              ? 'text-emerald-400'
+              : signal.confluenceScore >= 40
+              ? 'text-yellow-400'
+              : 'text-gray-400'
+          }`}
+        >
+          {signal.confluenceScore}%
+        </span>
       </div>
 
-      <div className="grid grid-cols-3 gap-2 mb-2 text-xs">
+      <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-2 text-xs">
         <div>
           <span className="text-gray-500">Entrada</span>
           <p className="text-white font-mono">${signal.entryPrice.toFixed(2)}</p>
@@ -201,35 +212,35 @@ export function SignalCard({ signal, onSave, onExecute, brokerConnected = false 
         </div>
       )}
 
-      {/* Action Buttons */}
-      <div className="flex gap-1.5">
+      {/* Action Buttons — larger touch targets on mobile */}
+      <div className="flex gap-1.5 sm:gap-2">
         {brokerConnected && signal.overallDirection !== 'NEUTRAL' && (
           <>
             {!showRiskPreview ? (
               <Button
                 size="sm"
-                className="flex-1 text-[10px] h-6 bg-emerald-600 hover:bg-emerald-700"
+                className="flex-1 text-[10px] sm:text-xs h-8 sm:h-6 bg-emerald-600 hover:bg-emerald-700 min-h-[44px] sm:min-h-0"
                 onClick={assessTrade}
                 disabled={isAssessing}
               >
                 {isAssessing ? (
-                  <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                  <Loader2 className="w-3 h-3 sm:w-3.5 sm:h-3.5 animate-spin mr-1" />
                 ) : (
-                  <Zap className="w-3 h-3 mr-1" />
+                  <Zap className="w-3 h-3 sm:w-3.5 sm:h-3.5 mr-1" />
                 )}
                 Evaluar
               </Button>
             ) : riskPreview?.allowed ? (
               <Button
                 size="sm"
-                className="flex-1 text-[10px] h-6 bg-emerald-600 hover:bg-emerald-700"
+                className="flex-1 text-[10px] sm:text-xs h-8 sm:h-6 bg-emerald-600 hover:bg-emerald-700 min-h-[44px] sm:min-h-0"
                 onClick={executeTrade}
                 disabled={isExecuting}
               >
                 {isExecuting ? (
-                  <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                  <Loader2 className="w-3 h-3 sm:w-3.5 sm:h-3.5 animate-spin mr-1" />
                 ) : (
-                  <Zap className="w-3 h-3 mr-1" />
+                  <Zap className="w-3 h-3 sm:w-3.5 sm:h-3.5 mr-1" />
                 )}
                 Confirmar
               </Button>
@@ -240,10 +251,10 @@ export function SignalCard({ signal, onSave, onExecute, brokerConnected = false 
           <Button
             size="sm"
             variant="ghost"
-            className="flex-1 text-[10px] h-6 text-gray-400 hover:text-white"
+            className="flex-1 text-[10px] sm:text-xs h-8 sm:h-6 text-gray-400 hover:text-white min-h-[44px] sm:min-h-0"
             onClick={() => onSave(signal)}
           >
-            <Save className="w-3 h-3 mr-1" />
+            <Save className="w-3 h-3 sm:w-3.5 sm:h-3.5 mr-1" />
             Guardar
           </Button>
         )}

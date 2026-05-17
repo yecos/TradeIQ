@@ -6,6 +6,131 @@ El formato se basa en [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 
 ---
 
+## [0.23.0] - 2026-05-18
+
+### Agregado
+- **FEATURE**: Mobile Navigation Bar (`src/components/trading/mobile-nav.tsx`)
+  - Bottom navigation visible solo en móvil (< 768px)
+  - 4 tabs: Gráfico, Análisis, Portafolio, Ajustes
+  - Safe area padding para dispositivos con notch/home indicator
+  - Touch targets de mínimo 44px con Lucide icons
+- **FEATURE**: Dashboard completamente responsive
+  - Layout adaptativo: stacked en móvil (via MobileNav tabs), side-by-side en desktop
+  - Watchlist como chips horizontales scrolleables en móvil (`compact` prop)
+  - Panels compactos en móvil (menos padding, menos detalles, collapsible sections)
+  - Touch targets de mínimo 44px para interacción táctil
+  - Auto-resize del gráfico al cambiar orientación (ResizeObserver ya presente)
+  - Timeframe selector con botones más grandes y touch-friendly en móvil
+  - Mobile tab views: chart (con chips + timeframe), analysis (vectores + señales), portfolio, settings
+- **FEATURE**: Responsive CSS utilities en `globals.css`
+  - `.safe-area-pb` — Safe area padding para notch/home indicator
+  - `.tap-target` — Mínimo 44px para touch targets (WCAG)
+  - `.mobile-card` — Progressive padding (p-3 → p-4 → p-6)
+  - `.mobile-hide` / `.desktop-hide` — Visibilidad condicional
+  - `.mb-safe-nav` — Padding bottom para evitar contenido detrás del nav bar
+  - `.chips-scroll` — Contenedor horizontal scrolleable sin scrollbar
+  - `.chip`, `.chip-active`, `.chip-inactive` — Estilos de chips horizontales
+
+### Cambios
+- **CHANGE**: page.tsx ahora usa MobileNav en móvil con 4 vistas separadas (chart/analysis/portfolio/settings)
+- **CHANGE**: page.tsx tiene layout dual: móvil (tabs) + desktop (sidebar + main + right panel)
+- **CHANGE**: WatchlistPanel acepta prop `compact` para renderizar como chips horizontales
+- **CHANGE**: SignalCard con layout compacto en móvil (confluencia como texto, botones más grandes)
+- **CHANGE**: BrokerPanel con secciones colapsables en móvil (account details, positions)
+- **CHANGE**: BrokerPanel con inputs y botones más grandes para touch (min-h-[44px])
+
+---
+
+## [0.22.0] - 2026-05-18
+
+### Agregado
+- **FEATURE**: Order Flow Analysis (`src/lib/analysis/order-flow.ts`)
+  - Libro de órdenes con depth visualization (bids/asks con cumulative totals)
+  - Cumulative delta (buy volume vs sell volume)
+  - Detección de absorción (large resting orders absorbing market orders)
+  - Detección de actividad whale (órdenes grandes >2x promedio)
+  - Datos reales de Binance para crypto (order book + trades, sin autenticación)
+  - Datos simulados para stocks/ETFs como fallback
+  - 4 tipos de señales: orderflow (imbalance), delta_flow, whale_activity, absorption
+- **FEATURE**: API endpoint `GET /api/orderflow?symbol=BTC&price=65000`
+  - Retorna: orderBook, tradeFlow, absorptionEvents, signals, source
+- **FEATURE**: 7mo vector `orderflow` en vector-definitions (deshabilitado por defecto)
+- **FEATURE**: Tipos OrderBookLevel, OrderBookSnapshot, TradeFlow, AbsorptionEvent, OrderFlowResult en types.ts
+- **FEATURE**: 20 nuevos tests de order flow (381 total)
+
+### Cambios
+- **CHANGE**: VectorCategory ahora incluye 'orderflow'
+- **CHANGE**: confluence-engine.ts integra señales de order flow (peso 1.1)
+
+---
+
+## [0.21.0] - 2026-05-18
+
+### Agregado
+- **FEATURE**: Multi-Timeframe Analysis (`src/lib/analysis/multi-timeframe.ts`)
+  - Análisis simultáneo de 5 timeframes: 1D (tendencia), 4H (confirmación), 1H (confirmación), 15M (entrada), 5M (entrada)
+  - Pesos por rol: timeframes mayores tienen más peso para tendencia, menores para entrada
+  - Detección de alineación multi-timeframe (0-100%)
+  - Señal de conflicto cuando tendencia y entrada divergen
+  - Señales de alineación (multi_tf), tendencia (trend_tf), entrada (entry_tf), conflicto (tf_conflict)
+  - Integración con confluence engine (peso 1.4 para señales multi-TF)
+- **FEATURE**: API endpoint `/api/analyze` ahora acepta parámetro `timeframes`
+  - Ejemplo: `POST /api/analyze { symbol: "BTC", vectors: ["technical"], timeframes: ["1D", "1H", "5M"] }`
+  - Retorna `multiTimeframe` con análisis de cada timeframe y confluencia multi-TF
+- **FEATURE**: Tipos `TimeframeConfig`, `TimeframeAnalysis`, `MultiTimeframeResult` en types.ts
+- **FEATURE**: 20 nuevos tests de multi-timeframe (361 total)
+
+### Cambios
+- **CHANGE**: `generateConfluence()` ahora acepta `multiTimeframe` en precomputed para integrar señales multi-TF
+- **CHANGE**: `getCandles()` ya soporta parámetro `interval` para diferentes timeframes
+- **CHANGE**: API `/api/analyze` retorna campo adicional `multiTimeframe` cuando se solicita
+
+---
+
+## [0.20.0] - 2026-05-18
+
+### Agregado
+- **FEATURE**: Capa compartida de utilidades AI (`src/lib/ai/`)
+  - `sdk.ts` — SDK Singleton que evita llamadas repetidas a `ZAI.create()`, compartido entre todos los módulos de análisis
+  - `article-reader.ts` — Lectura de contenido completo de artículos via z-ai-web-dev-sdk web_reader (no solo snippets de búsqueda)
+  - `prompts.ts` — Templates centralizados de prompts: NEWS_ANALYSIS_PROMPT, SENTIMENT_ANALYSIS_PROMPT, MACRO_ANALYSIS_PROMPT
+  - `index.ts` — Barrel export para imports limpios
+- **FEATURE**: API endpoint `GET /api/news?symbol=BTC` — Análisis de noticias standalone para pre-loading
+- **FEATURE**: 24 nuevos tests de AI analysis (341 total)
+  - SDK Singleton: getSDK function, instance creation, singleton behavior
+  - Prompts: NEWS_ANALYSIS_PROMPT, SENTIMENT_ANALYSIS_PROMPT, MACRO_ANALYSIS_PROMPT structure validation
+  - Article Reader: readArticle, readArticles, null handling, content parsing
+  - News Analysis: valid structure, caching, signal structure, fallback, enhanced prompt verification
+  - Sentiment Analysis: valid structure, vectorId, contrarian detection prompt, fallback
+  - Macro Analysis: valid structure, economic events, vectorId, enhanced prompt, fallback
+
+### Cambios
+- **CHANGE**: `news-analysis.ts` — Mejora significativa:
+  - Usa SDK singleton en lugar de imports repetidos de z-ai-web-dev-sdk
+  - Búsqueda multi-fuente (2 queries diferentes) para cobertura más amplia
+  - Lee contenido completo de artículos via article-reader (no solo snippets)
+  - Confidence mejorado basado en acuerdo entre fuentes (AI 60% + source agreement 40%)
+  - Detección de eventos (earnings, regulatory, product launches, analyst upgrades/downgrades)
+  - Key risks y catalysts del análisis AI en descripción de señales
+  - Timeout aumentado de 8s a 12s para análisis enriquecido
+- **CHANGE**: `sentiment-analysis.ts` — Mejora significativa:
+  - Usa SDK singleton para eficiencia
+  - Prompt mejorado con detección contrarian, emoción dominante, narrative strength
+  - Señales contrarian: sentimiento extremo = posible reversión, confianza reducida (-20)
+  - Emoción dominante y narrative strength incluidos en descripción de señales
+  - Put/Call ratio estimado por AI para stocks
+  - Timeout aumentado de 8s a 10s
+- **CHANGE**: `macro-analysis.ts` — Mejora significativa:
+  - Usa SDK singleton para eficiencia
+  - Prompt mejorado con sector impact, risk environment, inflation/employment trends
+  - 3 fuentes de búsqueda (macro + fed + economic calendar) vs 2 anteriores
+  - Clasificación de risk environment (risk-on/risk-off/neutral) en señales
+  - Inflation y employment trends incluidos en descripción de señales
+  - Hasta 5 eventos económicos vs 4 anteriormente
+  - Timeout aumentado de 10s a 12s
+
+---
+
 ## [0.19.0] - 2026-05-18
 
 ### Agregado
