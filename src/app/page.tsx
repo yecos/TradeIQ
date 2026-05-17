@@ -721,6 +721,30 @@ export default function TradeIQDashboard() {
                 <p className="text-[8px] sm:text-[10px] text-gray-500">TP</p>
               </div>
 
+              {/* Timeframe Recommendation */}
+              {activeConfluence.timeframeRecommendation && (
+                <div className="flex-shrink-0 hidden sm:block border-l border-white/10 pl-3 ml-1">
+                  <div className="flex items-center gap-1">
+                    <Clock className="w-3 h-3 text-gray-500" />
+                    <span className="text-[9px] sm:text-[10px] font-bold text-white">
+                      {activeConfluence.timeframeRecommendation.strategyLabel}
+                    </span>
+                    <span className="text-[8px] sm:text-[9px] text-gray-400">
+                      {activeConfluence.timeframeRecommendation.estimatedDuration}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className={`w-1.5 h-1.5 rounded-full ${
+                      activeConfluence.timeframeRecommendation.conviction === 'high' ? 'bg-emerald-400' :
+                      activeConfluence.timeframeRecommendation.conviction === 'medium' ? 'bg-yellow-400' : 'bg-red-400'
+                    }`} />
+                    <p className="text-[8px] sm:text-[9px] text-gray-500">
+                      Convicción {activeConfluence.timeframeRecommendation.convictionLabel}
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* Active Vectors — desktop only */}
               <div className="ml-auto hidden md:block">
                 <div className="flex items-center gap-1">

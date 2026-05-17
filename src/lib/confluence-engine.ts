@@ -6,6 +6,7 @@ import { analyzeNews } from './news-analysis';
 import { analyzeSentiment } from './sentiment-analysis';
 import { analyzeMacro } from './macro-analysis';
 import { VECTOR_DEFINITIONS } from './vector-definitions';
+import { generateTimeframeRecommendation } from './timeframe-recommender';
 
 /**
  * Generate confluence from pre-computed analysis results.
@@ -155,6 +156,28 @@ export async function generateConfluence(
     recommendation = `Baja confluencia (${confluenceScore}%). Vectores mixtos o insuficientes. Mejor esperar.`;
   }
 
+  // Generate timeframe and duration recommendation
+  const timeframeRecommendation = generateTimeframeRecommendation(
+    {
+      symbol,
+      overallDirection,
+      confluenceScore,
+      entryPrice,
+      stopLoss,
+      takeProfit,
+      riskReward,
+      vectorSignals: allSignals,
+      recommendation,
+      timestamp: Date.now(),
+    },
+    technical,
+    patterns,
+    volume,
+    news,
+    sentiment,
+    macro,
+  );
+
   return {
     symbol,
     overallDirection,
@@ -165,6 +188,7 @@ export async function generateConfluence(
     riskReward,
     vectorSignals: allSignals,
     recommendation,
+    timeframeRecommendation,
     timestamp: Date.now(),
   };
 }

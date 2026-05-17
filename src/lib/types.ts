@@ -119,6 +119,18 @@ export interface MacroAnalysis {
   signals: VectorSignal[];
 }
 
+// Timeframe Recommendation
+export interface TimeframeRecommendation {
+  strategy: 'scalping' | 'intraday' | 'swing' | 'position';
+  strategyLabel: string;
+  suggestedTimeframes: string[];
+  estimatedDuration: string;
+  estimatedDurationHours: { min: number; max: number };
+  conviction: 'high' | 'medium' | 'low';
+  convictionLabel: string;
+  reasoning: string[];
+}
+
 // Confluence Engine Types
 export interface ConfluenceResult {
   symbol: string;
@@ -130,6 +142,7 @@ export interface ConfluenceResult {
   riskReward: number;
   vectorSignals: VectorSignal[];
   recommendation: string;
+  timeframeRecommendation?: TimeframeRecommendation;
   timestamp: number;
 }
 
