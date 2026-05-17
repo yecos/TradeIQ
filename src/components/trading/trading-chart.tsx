@@ -16,6 +16,7 @@ export function TradingChart({ candles, symbol }: TradingChartProps) {
   const candlestickSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
   const prevSymbolRef = useRef<string>('');
+  const prevCandleCountRef = useRef<number>(0);
 
   // Memoize chart data transformation
   const chartData = useMemo(() => {
@@ -123,14 +124,33 @@ export function TradingChart({ candles, symbol }: TradingChartProps) {
     if (!candlestickSeriesRef.current || !volumeSeriesRef.current) return;
     if (chartData.candles.length === 0) return;
 
+    const isSymbolChange = prevSymbolRef.current !== symbol;
+    const isDataUpdate = !isSymbolChange && prevCandleCountRef.current > 0;
+
     candlestickSeriesRef.current.setData(chartData.candles);
     volumeSeriesRef.current.setData(chartData.volume);
 
-    // If symbol changed, fit content. If just data update, keep scroll position.
-    if (prevSymbolRef.current !== symbol) {
+    if (isSymbolChange) {
+      // Symbol changed — fit chart to show all data
       chartRef.current?.timeScale().fitContent();
       prevSymbolRef.current = symbol;
+    } else if (isDataUpdate) {
+      // Data update (new candle or price change) — scroll to latest candle
+      // Keep the user's zoom level but ensure the latest candle is visible
+      const timeScale = chartRef.current?.timeScale();
+      if (timeScale) {
+        const logicalRange = timeScale.getVisibleLogicalRange();
+        const maxLogicalIndex = chartData.candles.length - 1;
+
+        // If the user is already viewing the latest area (within 5 candles),
+        // auto-scroll to keep the latest visible
+        if (logicalRange && logicalRange.to >= maxLogicalIndex - 5) {
+          timeScale.scrollToRealTime();
+        }
+      }
     }
+
+    prevCandleCountRef.current = chartData.candles.length;
   }, [chartData, symbol]);
 
   return (

@@ -16,11 +16,32 @@ import { DataCache } from './market-data-interface';
  * - Stock/ETF symbols → PolygonProvider (if API key set) or MockProvider
  * - Fallback: MockProvider for any symbol that fails
  *
- * IMPORTANT: CoinGecko is the primary crypto provider because it works from
- * ANY location (including US-based servers like Vercel). Binance is kept as
- * secondary because binance.com is geo-blocked from US and binance.us has
- * limited trading pairs.
+ * PERFORMANCE: All operations have a hard timeout to prevent Vercel
+ * serverless function timeouts. We prefer fast partial results over
+ * slow complete results.
  */
+
+/** Maximum time (ms) to wait for any single provider before falling back */
+const PROVIDER_TIMEOUT = 8000;
+
+/** Maximum time (ms) for the entire getMultipleQuotes operation */
+const BATCH_TIMEOUT = 12000;
+
+/**
+ * Race a promise against a timeout — returns null if the promise takes too long.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T | null> {
+  return Promise.race([
+    promise,
+    new Promise<null>(resolve =>
+      setTimeout(() => {
+        console.warn(`[TradeIQ] ${label} timed out after ${ms}ms`);
+        resolve(null);
+      }, ms)
+    ),
+  ]);
+}
+
 export class SmartProvider implements MarketDataProvider {
   readonly name = 'smart';
   private coingecko: CoinGeckoProvider;
@@ -31,7 +52,7 @@ export class SmartProvider implements MarketDataProvider {
 
   // Cache for crypto quotes to avoid hitting APIs on every request
   private cryptoQuoteCache = new Map<string, { data: Quote; timestamp: number }>();
-  private cryptoQuoteCacheTtl = 15_000; // 15s
+  private cryptoQuoteCacheTtl = 30_000; // 30s
 
   constructor(polygonApiKey?: string) {
     this.coingecko = new CoinGeckoProvider();
@@ -58,7 +79,12 @@ export class SmartProvider implements MarketDataProvider {
     // Stocks: Polygon or Mock
     const provider = this.getStockProvider();
     try {
-      return await provider.getCandles(symbol, days, interval);
+      const result = await withTimeout(
+        provider.getCandles(symbol, days, interval),
+        PROVIDER_TIMEOUT,
+        `${provider.name}.getCandles(${symbol})`
+      );
+      return result ?? this.mock.getCandles(symbol, days, interval);
     } catch {
       console.warn(`[TradeIQ] ${provider.name} failed for getCandles(${symbol}), using mock`);
       return this.mock.getCandles(symbol, days, interval);
@@ -73,7 +99,12 @@ export class SmartProvider implements MarketDataProvider {
     // Stocks: Polygon or Mock
     const provider = this.getStockProvider();
     try {
-      return await provider.getQuote(symbol);
+      const result = await withTimeout(
+        provider.getQuote(symbol),
+        PROVIDER_TIMEOUT,
+        `${provider.name}.getQuote(${symbol})`
+      );
+      return result ?? this.mock.getQuote(symbol);
     } catch {
       console.warn(`[TradeIQ] ${provider.name} failed for getQuote(${symbol}), using mock`);
       return this.mock.getQuote(symbol);
@@ -81,72 +112,70 @@ export class SmartProvider implements MarketDataProvider {
   }
 
   async getMultipleQuotes(symbols: string[]): Promise<Quote[]> {
+    const startTime = Date.now();
+
     const cryptoSymbols = symbols.filter(isCryptoSymbol);
     const stockSymbols = symbols.filter(s => !isCryptoSymbol(s));
 
     const quotes: Quote[] = [];
 
-    // Fetch all crypto from CoinGecko in ONE batch request (very efficient)
+    // Fetch crypto quotes — race CoinGecko vs Binance, with mock as safety net
     if (cryptoSymbols.length > 0) {
       try {
-        const cryptoQuotes = await this.coingecko.getMultipleQuotes(cryptoSymbols);
-        quotes.push(...cryptoQuotes);
+        const cryptoQuotes = await withTimeout(
+          this.fetchCryptoQuotes(cryptoSymbols),
+          BATCH_TIMEOUT,
+          'fetchCryptoQuotes'
+        );
 
-        // Fill in any missing crypto from Binance or Mock
-        const receivedSymbols = new Set(cryptoQuotes.map(q => q.symbol));
-        const missingCrypto = cryptoSymbols.filter(s => !receivedSymbols.has(s));
+        if (cryptoQuotes && cryptoQuotes.length > 0) {
+          quotes.push(...cryptoQuotes);
 
-        if (missingCrypto.length > 0) {
-          // Try Binance for missing ones
-          try {
-            const binanceQuotes = await this.binance.getMultipleQuotes(missingCrypto);
-            quotes.push(...binanceQuotes);
+          // Fill in any missing crypto with mock
+          const receivedSymbols = new Set(cryptoQuotes.map(q => q.symbol));
+          const missingCrypto = cryptoSymbols.filter(s =>
+            !receivedSymbols.has(s) && !receivedSymbols.has(s.replace('USDT', '').replace('BUSD', ''))
+          );
 
-            const stillMissing = missingCrypto.filter(
-              s => !binanceQuotes.some(q => q.symbol === s)
-            );
-            // Final fallback to Mock for anything still missing
-            if (stillMissing.length > 0) {
-              const mockQuotes = await this.mock.getMultipleQuotes(stillMissing);
-              quotes.push(...mockQuotes);
-            }
-          } catch {
-            // Binance failed, use mock for all missing
-            const mockQuotes = await this.mock.getMultipleQuotes(missingCrypto);
-            quotes.push(...mockQuotes);
-          }
-        }
-      } catch {
-        // CoinGecko entirely failed — fall back to Binance then Mock
-        console.warn('[TradeIQ] CoinGecko batch failed, trying Binance...');
-        try {
-          const binanceQuotes = await this.binance.getMultipleQuotes(cryptoSymbols);
-          quotes.push(...binanceQuotes);
-
-          const receivedSymbols = new Set(binanceQuotes.map(q => q.symbol));
-          const missingCrypto = cryptoSymbols.filter(s => !receivedSymbols.has(s));
           if (missingCrypto.length > 0) {
             const mockQuotes = await this.mock.getMultipleQuotes(missingCrypto);
             quotes.push(...mockQuotes);
           }
-        } catch {
-          // Both CoinGecko and Binance failed — use mock
-          console.warn('[TradeIQ] Both CoinGecko and Binance failed, using mock for crypto');
+        } else {
+          // All providers failed/timed out — use mock for all crypto
           const mockQuotes = await this.mock.getMultipleQuotes(cryptoSymbols);
           quotes.push(...mockQuotes);
         }
+      } catch (error) {
+        console.warn('[TradeIQ] Crypto quote fetch failed entirely, using mock:', error instanceof Error ? error.message : error);
+        const mockQuotes = await this.mock.getMultipleQuotes(cryptoSymbols);
+        quotes.push(...mockQuotes);
       }
     }
 
-    // Fetch stocks from Polygon or Mock
+    // Fetch stocks from Polygon or Mock (fast, mock is instant)
     if (stockSymbols.length > 0) {
       try {
-        const stockQuotes = await this.getStockProvider().getMultipleQuotes(stockSymbols);
-        quotes.push(...stockQuotes);
+        const stockResult = await withTimeout(
+          this.getStockProvider().getMultipleQuotes(stockSymbols),
+          PROVIDER_TIMEOUT,
+          'stockQuotes'
+        );
+        if (stockResult && stockResult.length > 0) {
+          quotes.push(...stockResult);
+        } else {
+          const mockQuotes = await this.mock.getMultipleQuotes(stockSymbols);
+          quotes.push(...mockQuotes);
+        }
       } catch {
         const mockQuotes = await this.mock.getMultipleQuotes(stockSymbols);
         quotes.push(...mockQuotes);
       }
+    }
+
+    const elapsed = Date.now() - startTime;
+    if (elapsed > 3000) {
+      console.warn(`[TradeIQ] getMultipleQuotes took ${elapsed}ms for ${symbols.length} symbols`);
     }
 
     // Return in the same order as input
@@ -164,14 +193,14 @@ export class SmartProvider implements MarketDataProvider {
   async searchSymbols(query: string): Promise<SymbolInfo[]> {
     // Search CoinGecko (crypto) and stocks in parallel
     const results = await Promise.allSettled([
-      this.coingecko.searchSymbols(query),
-      this.getStockProvider().searchSymbols(query),
+      withTimeout(this.coingecko.searchSymbols(query), 5000, 'coingecko.search'),
+      withTimeout(this.getStockProvider().searchSymbols(query), 5000, 'stock.search'),
     ]);
 
     const combined: SymbolInfo[] = [];
 
     for (const result of results) {
-      if (result.status === 'fulfilled') {
+      if (result.status === 'fulfilled' && result.value) {
         combined.push(...result.value);
       }
     }
@@ -205,6 +234,66 @@ export class SmartProvider implements MarketDataProvider {
 
   // --- Private helpers ---
 
+  /**
+   * Fetch crypto quotes with intelligent fallback chain.
+   * 1. Try CoinGecko batch (fast, one request for all)
+   * 2. If CoinGecko fails/times out, try Binance (max 5 symbols)
+   * 3. Any still missing → Mock
+   */
+  private async fetchCryptoQuotes(symbols: string[]): Promise<Quote[]> {
+    // Try CoinGecko first (batch request — very efficient)
+    const cgResult = await withTimeout(
+      this.coingecko.getMultipleQuotes(symbols),
+      8000, // 8s max for CoinGecko
+      'CoinGecko.getMultipleQuotes'
+    );
+
+    if (cgResult && cgResult.length > 0) {
+      // CoinGecko returned some data — check if we got everything
+      const receivedSymbols = new Set(cgResult.map(q => q.symbol));
+      const missing = symbols.filter(s =>
+        !receivedSymbols.has(s) && !receivedSymbols.has(s.replace('USDT', '').replace('BUSD', ''))
+      );
+
+      if (missing.length === 0) {
+        return cgResult; // Got everything from CoinGecko!
+      }
+
+      // Try Binance for just the missing ones (max 5 to limit latency)
+      try {
+        const binanceMissing = missing.slice(0, 5);
+        const binanceQuotes = await withTimeout(
+          this.binance.getMultipleQuotes(binanceMissing),
+          6000,
+          'Binance.getMultipleQuotes(missing)'
+        );
+        if (binanceQuotes && binanceQuotes.length > 0) {
+          return [...cgResult, ...binanceQuotes];
+        }
+      } catch {
+        // Binance also failed for missing ones
+      }
+
+      return cgResult; // Return what we have from CoinGecko
+    }
+
+    // CoinGecko entirely failed/timed out — try Binance for up to 5 symbols
+    console.warn('[TradeIQ] CoinGecko batch failed/timed out, trying Binance...');
+    const binanceSymbols = symbols.slice(0, 5);
+    const binanceResult = await withTimeout(
+      this.binance.getMultipleQuotes(binanceSymbols),
+      6000,
+      'Binance.getMultipleQuotes'
+    );
+
+    if (binanceResult && binanceResult.length > 0) {
+      return binanceResult;
+    }
+
+    // Both failed — return empty to trigger mock fallback
+    throw new Error('All crypto providers failed');
+  }
+
   private async getCryptoQuote(symbol: string): Promise<Quote> {
     // Check cache first
     const cached = this.cryptoQuoteCache.get(symbol);
@@ -213,21 +302,27 @@ export class SmartProvider implements MarketDataProvider {
     }
 
     // Try CoinGecko first (works from US servers)
-    try {
-      const quote = await this.coingecko.getQuote(symbol);
-      this.cryptoQuoteCache.set(symbol, { data: quote, timestamp: Date.now() });
-      return quote;
-    } catch {
-      console.warn(`[TradeIQ] CoinGecko failed for ${symbol}, trying Binance...`);
+    const cgQuote = await withTimeout(
+      this.coingecko.getQuote(symbol),
+      8000,
+      `CoinGecko.getQuote(${symbol})`
+    );
+
+    if (cgQuote) {
+      this.cryptoQuoteCache.set(symbol, { data: cgQuote, timestamp: Date.now() });
+      return cgQuote;
     }
 
     // Try Binance
-    try {
-      const quote = await this.binance.getQuote(symbol);
-      this.cryptoQuoteCache.set(symbol, { data: quote, timestamp: Date.now() });
-      return quote;
-    } catch {
-      console.warn(`[TradeIQ] Binance also failed for ${symbol}, using mock`);
+    const binQuote = await withTimeout(
+      this.binance.getQuote(symbol),
+      5000,
+      `Binance.getQuote(${symbol})`
+    );
+
+    if (binQuote) {
+      this.cryptoQuoteCache.set(symbol, { data: binQuote, timestamp: Date.now() });
+      return binQuote;
     }
 
     // Final fallback to mock
@@ -242,8 +337,12 @@ export class SmartProvider implements MarketDataProvider {
   ): Promise<Candle[]> {
     for (const provider of providers) {
       try {
-        const candles = await provider.getCandles(symbol, days, interval);
-        if (candles.length > 0) return candles;
+        const result = await withTimeout(
+          provider.getCandles(symbol, days, interval),
+          PROVIDER_TIMEOUT,
+          `${provider.name}.getCandles(${symbol}, ${interval})`
+        );
+        if (result && result.length > 0) return result;
       } catch (error) {
         console.warn(
           `[TradeIQ] ${provider.name} failed for getCandles(${symbol}, ${interval}):`,

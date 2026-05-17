@@ -16,6 +16,17 @@ interface WatchlistPanelProps {
   isLoading?: boolean;
 }
 
+/**
+ * Format price with appropriate decimal precision.
+ * BTC → "$103,245.67", XRP → "$0.5523", DOGE → "$0.162500"
+ */
+function formatWatchlistPrice(price: number): string {
+  if (price >= 1000) return price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (price >= 1) return price.toFixed(4);
+  if (price >= 0.01) return price.toFixed(5);
+  return price.toFixed(6);
+}
+
 export function WatchlistPanel({ quotes, isLoading }: WatchlistPanelProps) {
   const { selectedSymbol, setSelectedSymbol } = useAppStore();
 
@@ -25,6 +36,11 @@ export function WatchlistPanel({ quotes, isLoading }: WatchlistPanelProps) {
         Array.from({ length: 5 }).map((_, i) => (
           <div key={i} className="h-12 rounded-lg bg-white/5 animate-pulse" />
         ))
+      ) : quotes.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-6 text-gray-500">
+          <Star className="w-6 h-6 mb-2 opacity-30" />
+          <p className="text-[10px]">Cargando datos...</p>
+        </div>
       ) : (
         quotes.map((q) => {
           const isSelected = q.symbol === selectedSymbol;
@@ -52,7 +68,7 @@ export function WatchlistPanel({ quotes, isLoading }: WatchlistPanelProps) {
                 </div>
               </div>
               <div className="text-right flex-shrink-0 ml-2">
-                <p className="text-xs font-mono text-white">${q.price.toFixed(2)}</p>
+                <p className="text-xs font-mono text-white">${formatWatchlistPrice(q.price)}</p>
                 <div className={`flex items-center gap-0.5 text-[10px] ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
                   {isPositive ? <TrendingUp className="w-2.5 h-2.5" /> : <TrendingDown className="w-2.5 h-2.5" />}
                   {isPositive ? '+' : ''}{q.changePercent.toFixed(2)}%

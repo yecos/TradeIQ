@@ -114,34 +114,50 @@ export default function TradeIQDashboard() {
   const { data: quotes = [], isLoading: isLoadingQuotes, refetch: refetchQuotes } = useQuery({
     queryKey: ['quotes', watchlist],
     queryFn: async () => {
-      const res = await fetch(`/api/market/quote?symbols=${watchlist.join(',')}`);
-      const data = await res.json();
-      return (data.quotes || []) as Quote[];
+      try {
+        const res = await fetch(`/api/market/quote?symbols=${watchlist.join(',')}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        return (data.quotes || []) as Quote[];
+      } catch (error) {
+        console.warn('[TradeIQ] Quote fetch failed:', error);
+        return [] as Quote[];
+      }
     },
     refetchInterval: 15000, // 15s for near-real-time updates
+    retry: 1, // Only retry once on failure
+    staleTime: 5000, // 5s stale time to avoid spam
   });
 
-  // Fetch candles using TanStack Query — refetch every 60s
+  // Fetch candles using TanStack Query — refetch interval depends on timeframe
   const { data: candles = [] } = useQuery({
     queryKey: ['candles', selectedSymbol, timeframe],
     queryFn: async () => {
-      // Map timeframe to days for the API
-      const daysForTimeframe: Record<string, number> = {
-        '1m': 1,
-        '5m': 2,
-        '15m': 5,
-        '1H': 30,
-        '4H': 90,
-        '1D': 180,
-        '1W': 365,
-      };
-      const days = daysForTimeframe[timeframe] || 180;
-      const res = await fetch(`/api/market/candles?symbol=${selectedSymbol}&days=${days}&interval=${timeframe}`);
-      const data = await res.json();
-      return (data.candles || []) as Candle[];
+      try {
+        // Map timeframe to days for the API
+        const daysForTimeframe: Record<string, number> = {
+          '1m': 1,
+          '5m': 2,
+          '15m': 5,
+          '1H': 30,
+          '4H': 90,
+          '1D': 180,
+          '1W': 365,
+        };
+        const days = daysForTimeframe[timeframe] || 180;
+        const res = await fetch(`/api/market/candles?symbol=${selectedSymbol}&days=${days}&interval=${timeframe}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        return (data.candles || []) as Candle[];
+      } catch (error) {
+        console.warn('[TradeIQ] Candle fetch failed:', error);
+        return [] as Candle[];
+      }
     },
     refetchInterval: timeframe === '1m' || timeframe === '5m' ? 10000 :
                      timeframe === '15m' || timeframe === '1H' ? 30000 : 60000,
+    retry: 1, // Only retry once on failure
+    staleTime: 10000, // 10s stale time
   });
 
   // Symbol search with debounce
@@ -419,7 +435,7 @@ export default function TradeIQDashboard() {
           {currentQuote && (
             <div className="flex items-center gap-3">
               <span className="text-sm font-bold">{currentQuote.symbol}</span>
-              <span className="text-sm font-mono">${currentQuote.price.toFixed(2)}</span>
+              <span className="text-sm font-mono">${currentQuote.price >= 1 ? currentQuote.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : currentQuote.price.toFixed(4)}</span>
               <span className={`text-xs font-mono ${currentQuote.change >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                 {currentQuote.change >= 0 ? '+' : ''}{currentQuote.changePercent.toFixed(2)}%
               </span>
@@ -506,10 +522,10 @@ export default function TradeIQDashboard() {
               <div className="ml-auto flex items-center gap-2">
                 {currentQuote && (
                   <span className="text-[10px] text-gray-500">
-                    O: <span className="text-gray-300">${currentQuote.open.toFixed(2)}</span>
-                    {' '}H: <span className="text-gray-300">${currentQuote.high.toFixed(2)}</span>
-                    {' '}L: <span className="text-gray-300">${currentQuote.low.toFixed(2)}</span>
-                    {' '}C: <span className={currentQuote.change >= 0 ? 'text-emerald-400' : 'text-red-400'}>${currentQuote.price.toFixed(2)}</span>
+                    O: <span className="text-gray-300">${currentQuote.open >= 1 ? currentQuote.open.toFixed(2) : currentQuote.open.toFixed(4)}</span>
+                    {' '}H: <span className="text-gray-300">${currentQuote.high >= 1 ? currentQuote.high.toFixed(2) : currentQuote.high.toFixed(4)}</span>
+                    {' '}L: <span className="text-gray-300">${currentQuote.low >= 1 ? currentQuote.low.toFixed(2) : currentQuote.low.toFixed(4)}</span>
+                    {' '}C: <span className={currentQuote.change >= 0 ? 'text-emerald-400' : 'text-red-400'}>${currentQuote.price >= 1 ? currentQuote.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : currentQuote.price.toFixed(4)}</span>
                   </span>
                 )}
               </div>

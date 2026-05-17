@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCandles } from '@/lib/market-data';
 import { MockProvider } from '@/lib/data/mock-provider';
 
+const mockProvider = new MockProvider();
+
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const symbol = searchParams.get('symbol') || 'AAPL';
@@ -9,14 +11,24 @@ export async function GET(request: NextRequest) {
   const interval = searchParams.get('interval') || '1D';
 
   try {
-    const candles = await getCandles(symbol, days, interval);
+    // Hard timeout to prevent serverless function timeout
+    const candles = await Promise.race([
+      getCandles(symbol, days, interval),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Candle fetch timed out')), 9000)
+      ),
+    ]);
     return NextResponse.json({ symbol, candles, interval });
   } catch (error) {
-    console.warn(`[TradeIQ] Failed to fetch candles for ${symbol} (${interval}), falling back to mock:`, error);
+    console.warn(`[TradeIQ] Failed to fetch candles for ${symbol} (${interval}), falling back to mock:`, error instanceof Error ? error.message : error);
 
-    // Fallback to mock data
-    const mockProvider = new MockProvider();
-    const candles = await mockProvider.getCandles(symbol, days, interval);
-    return NextResponse.json({ symbol, candles, interval, fallback: true });
+    // ALWAYS return data — never leave the client hanging
+    try {
+      const candles = await mockProvider.getCandles(symbol, days, interval);
+      return NextResponse.json({ symbol, candles, interval, fallback: true });
+    } catch {
+      // Even mock failed (shouldn't happen)
+      return NextResponse.json({ symbol, candles: [], interval, fallback: true, error: 'No data available' });
+    }
   }
 }

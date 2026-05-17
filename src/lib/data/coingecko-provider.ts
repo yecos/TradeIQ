@@ -6,7 +6,7 @@ import type { MarketDataProvider, SymbolInfo } from './market-data-interface';
  * Works from ANY location including US servers (no geo-blocking).
  * No API key required — all endpoints used are public (free tier).
  *
- * Rate limits: ~10-30 requests/min (free tier) — we use caching to stay within limits.
+ * Rate limits: ~10-30 requests/min (free tier) — we use aggressive caching to stay within limits.
  *
  * This is the recommended crypto provider when running on US-based servers
  * like Vercel, where Binance.com is geo-blocked and Binance.us has limited pairs.
@@ -56,9 +56,9 @@ function formatPrice(price: number): number {
 export class CoinGeckoProvider implements MarketDataProvider {
   readonly name = 'coingecko';
 
-  // Cache for quotes (30s TTL) — stay within rate limits
+  // Cache for quotes (60s TTL) — stay within rate limits
   private quoteCache = new Map<string, { data: Quote; timestamp: number }>();
-  private quoteCacheTtl = 30_000; // 30 seconds
+  private quoteCacheTtl = 60_000; // 60 seconds (increased from 30s)
 
   // Cache for candles (5min TTL)
   private candleCache = new Map<string, { data: Candle[]; timestamp: number }>();
@@ -66,7 +66,7 @@ export class CoinGeckoProvider implements MarketDataProvider {
 
   // Batch quote cache — CoinGecko supports batch queries
   private batchCache: { data: Map<string, Quote>; timestamp: number } | null = null;
-  private batchCacheTtl = 30_000; // 30 seconds
+  private batchCacheTtl = 60_000; // 60 seconds (increased from 30s)
 
   async getCandles(symbol: string, days: number = 180, interval: string = '1D'): Promise<Candle[]> {
     const cacheKey = `${symbol}-${days}-${interval}`;
@@ -90,7 +90,7 @@ export class CoinGeckoProvider implements MarketDataProvider {
 
     const response = await fetch(
       `${BASE_URL}/coins/${coinId}/ohlc?vs_currency=usd&days=${cgDays}`,
-      { signal: AbortSignal.timeout(15000) }
+      { signal: AbortSignal.timeout(8000) } // Reduced from 15s to 8s
     );
 
     if (!response.ok) {
@@ -171,8 +171,7 @@ export class CoinGeckoProvider implements MarketDataProvider {
 
   /**
    * Fetch all tracked crypto quotes in a single batch request.
-   * CoinGecko's /simple/price supports multiple IDs — much more efficient
-   * than individual requests.
+   * Uses /coins/markets which returns richer data than /simple/price.
    */
   private async getAllQuotesBatch(): Promise<Map<string, Quote>> {
     // Check batch cache
@@ -181,10 +180,53 @@ export class CoinGeckoProvider implements MarketDataProvider {
     }
 
     const allIds = Object.values(COINGECKO_IDS).map(info => info.id).join(',');
+
+    // Try /coins/markets first (richer data with sparklines, market cap, etc.)
+    try {
+      const url = `${BASE_URL}/coins/markets?vs_currency=usd&ids=${allIds}&order=market_cap_desc&sparkline=false&price_change_percentage=24h`;
+      const response = await fetch(url, {
+        signal: AbortSignal.timeout(8000), // Reduced from 15s to 8s
+      });
+
+      if (response.ok) {
+        const data: CoinGeckoMarketData[] = await response.json();
+        const quoteMap = new Map<string, Quote>();
+
+        for (const coin of data) {
+          const symbol = ID_TO_SYMBOL.get(coin.id);
+          if (!symbol) continue;
+
+          const price = coin.current_price || 0;
+          const changePercent = coin.price_change_percentage_24h || 0;
+          const change = price * (changePercent / 100);
+
+          quoteMap.set(symbol, {
+            symbol,
+            name: coin.name || COINGECKO_IDS[symbol]?.name || symbol,
+            price: formatPrice(price),
+            change: formatPrice(change),
+            changePercent: Math.round(changePercent * 100) / 100,
+            volume: Math.floor(coin.total_volume || 0),
+            high: formatPrice(coin.high_24h || price),
+            low: formatPrice(coin.low_24h || price),
+            open: formatPrice(price - change),
+            prevClose: formatPrice(price - change),
+          });
+        }
+
+        this.batchCache = { data: quoteMap, timestamp: Date.now() };
+        return quoteMap;
+      }
+    } catch {
+      // /coins/markets failed, try /simple/price as fallback
+      console.warn('[TradeIQ] CoinGecko /coins/markets failed, trying /simple/price...');
+    }
+
+    // Fallback to /simple/price (lighter weight, less data)
     const url = `${BASE_URL}/simple/price?ids=${allIds}&vs_currencies=usd&include_24hr_change=true&include_24hr_vol=true&include_high_24hr=true&include_low_24hr=true`;
 
     const response = await fetch(url, {
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(6000), // 6s for fallback
     });
 
     if (!response.ok) {
@@ -263,7 +305,6 @@ export class CoinGeckoProvider implements MarketDataProvider {
         low: formatPrice(c.low),
         close: formatPrice(c.close),
         // CoinGecko OHLC doesn't include volume, so we estimate from price range
-        // Typical crypto daily volume is roughly proportional to volatility × market cap
         volume: Math.floor(
           ((c.high - c.low) / c.close) * c.close * 500000 +
           c.close * 10000
@@ -323,6 +364,18 @@ export class CoinGeckoProvider implements MarketDataProvider {
 }
 
 // CoinGecko API response types
+
+interface CoinGeckoMarketData {
+  id: string;
+  symbol: string;
+  name: string;
+  current_price?: number;
+  price_change_percentage_24h?: number;
+  high_24h?: number;
+  low_24h?: number;
+  total_volume?: number;
+  market_cap?: number;
+}
 
 interface CoinGeckoPriceData {
   usd?: number;

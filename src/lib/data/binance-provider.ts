@@ -14,6 +14,10 @@ import type { MarketDataProvider, SymbolInfo } from './market-data-interface';
  * IMPORTANT: binance.us has fewer trading pairs than binance.com.
  * If a pair is not found on binance.us, the SmartProvider will fall back
  * to CoinGecko (which works everywhere).
+ *
+ * PERFORMANCE: All timeouts are kept short (3-5s) to prevent serverless
+ * function timeouts on Vercel. We prefer fast failure + fallback over
+ * slow success.
  */
 
 // Well-known crypto symbols with metadata
@@ -107,40 +111,43 @@ export class BinanceProvider implements MarketDataProvider {
   readonly name = 'binance';
   private activeBaseUrl: string | null = null; // Cached working URL
   private exchangeInfoCache: Map<string, string> | null = null;
-  private healthChecked = false;
+  private lastHealthCheck = 0; // Timestamp of last successful health check
+  private healthCheckInterval = 300_000; // Re-check every 5 minutes (not every request!)
 
   /**
    * Get the working Binance base URL.
    * Tries binance.us first (works from US), falls back to binance.com.
+   * Caches the working URL for 5 minutes to avoid health-checking on every request.
    */
   private async getBaseUrl(): Promise<string> {
-    // If we already found a working URL, use it
-    if (this.activeBaseUrl) return this.activeBaseUrl;
+    // If we recently found a working URL, use it
+    if (this.activeBaseUrl && (Date.now() - this.lastHealthCheck < this.healthCheckInterval)) {
+      return this.activeBaseUrl;
+    }
 
     // Try each URL with a lightweight health check
     for (const url of BINANCE_URLS) {
       try {
         const response = await fetch(`${url}/api/v3/ping`, {
-          signal: AbortSignal.timeout(5000), // 5s timeout
+          signal: AbortSignal.timeout(3000), // 3s timeout for health check (reduced from 5s)
         });
         if (response.ok) {
           this.activeBaseUrl = url;
-          this.healthChecked = true;
-          console.warn(`[TradeIQ] Binance connected: ${url}`);
+          this.lastHealthCheck = Date.now();
           return url;
         }
       } catch {
-        console.warn(`[TradeIQ] Binance ${url} unavailable, trying next...`);
+        // URL unavailable, try next
       }
     }
 
     // If all fail, default to .us (better chance from US servers)
-    console.warn('[TradeIQ] All Binance URLs failed health check, defaulting to binance.us');
     return BINANCE_URLS[0];
   }
 
   /**
    * Fetch from Binance with automatic URL fallback.
+   * Short timeouts to prevent serverless function timeouts.
    */
   private async fetchFromBinance<T>(path: string): Promise<T> {
     const urls = this.activeBaseUrl
@@ -150,19 +157,22 @@ export class BinanceProvider implements MarketDataProvider {
     for (const baseUrl of urls) {
       try {
         const response = await fetch(`${baseUrl}${path}`, {
-          signal: AbortSignal.timeout(10000), // 10s timeout
+          signal: AbortSignal.timeout(5000), // 5s timeout (reduced from 10s)
         });
 
         if (response.ok) {
           this.activeBaseUrl = baseUrl; // Cache working URL
+          this.lastHealthCheck = Date.now();
           return response.json() as Promise<T>;
         }
 
         // 451 = geo-blocked, 403 = forbidden, 429 = rate limited — try next URL
         if (response.status === 451 || response.status === 403 || response.status === 429) {
-          console.warn(`[TradeIQ] Binance ${baseUrl} blocked/rate-limited (${response.status}), trying fallback...`);
           // Clear cached URL so we try the other one next time
-          if (baseUrl === this.activeBaseUrl) this.activeBaseUrl = null;
+          if (baseUrl === this.activeBaseUrl) {
+            this.activeBaseUrl = null;
+            this.lastHealthCheck = 0;
+          }
           continue;
         }
 
@@ -177,9 +187,11 @@ export class BinanceProvider implements MarketDataProvider {
         throw new Error(`Binance API error: ${response.status} ${response.statusText}`);
       } catch (error) {
         // Network errors — try next URL
-        if (error instanceof TypeError || (error instanceof Error && (error.message.includes('fetch') || error.message.includes('abort')))) {
-          console.warn(`[TradeIQ] Binance ${baseUrl} network error, trying fallback...`);
-          if (baseUrl === this.activeBaseUrl) this.activeBaseUrl = null;
+        if (error instanceof TypeError || (error instanceof Error && (error.message.includes('fetch') || error.message.includes('abort') || error.message.includes('timeout')))) {
+          if (baseUrl === this.activeBaseUrl) {
+            this.activeBaseUrl = null;
+            this.lastHealthCheck = 0;
+          }
           continue;
         }
         // Re-throw application errors (like symbol not found)
@@ -245,14 +257,18 @@ export class BinanceProvider implements MarketDataProvider {
     // 1. Server crashes from too many concurrent fetches
     // 2. Rate limiting (especially binance.us: 120/min)
     // 3. Memory pressure from many concurrent responses
+    //
+    // LIMIT: Max 5 symbols to prevent excessive latency.
+    // SmartProvider should use CoinGecko for batch, Binance only for small fallbacks.
+    const maxSymbols = symbols.slice(0, 5);
     const quotes: Quote[] = [];
 
-    for (const symbol of symbols) {
+    for (const symbol of maxSymbols) {
       try {
         const quote = await this.getQuote(symbol);
         quotes.push(quote);
         // Small delay between requests to avoid rate limits
-        if (symbols.indexOf(symbol) < symbols.length - 1) {
+        if (maxSymbols.indexOf(symbol) < maxSymbols.length - 1) {
           await sleep(100);
         }
       } catch (error) {
