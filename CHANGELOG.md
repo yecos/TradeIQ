@@ -6,6 +6,25 @@ El formato se basa en [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 
 ---
 
+## [0.3.0] - 2026-05-17
+
+### Agregado
+- **DOCS**: WORKFLOW.md - Flujo de trabajo completo con reglas de desarrollo con IA
+- **DOCS**: PROMPTS.md - Prompt maestro y prompts por feature para sesiones de IA
+- **DOCS**: docs/adr/ - 5 Decisiones de Arquitectura (ADR-001 a ADR-005)
+  - ADR-001: SQLite → PostgreSQL en producción
+  - ADR-002: Provider Pattern para fuentes de datos
+  - ADR-003: lightweight-charts v5 para visualización
+  - ADR-004: Zustand + TanStack Query para estado
+  - ADR-005: Motor de Confluencia con pesos configurables
+
+### Cambios
+- **CHORE**: Estructura de directorios escalable definida en WORKFLOW.md (src/lib/data/, src/lib/broker/, src/lib/ai/, src/hooks/)
+- **CHORE**: Mapa de dependencias críticas documentado (types.ts, confluence-engine.ts, market-data.ts, schema.prisma)
+- **CHORE**: Reglas de seguridad para desarrollo con IA (no overwrite, no breaking interfaces, documentar cambios)
+
+---
+
 ## [0.2.0] - 2026-05-17
 
 ### Cambios
