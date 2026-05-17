@@ -62,7 +62,15 @@ export const authOptions: NextAuthOptions = {
   // PrismaAdapter handles user/account creation in the database
   // Note: Credentials provider doesn't use the adapter for session management,
   // but we use it for user creation/lookup
-  adapter: PrismaAdapter(prisma),
+  // Wrapped in try-catch for environments where DB is not available (e.g., Vercel without DB)
+  adapter: (() => {
+    try {
+      return PrismaAdapter(prisma);
+    } catch {
+      console.warn('[TradeIQ] PrismaAdapter init failed — running without DB adapter');
+      return undefined;
+    }
+  })(),
 
   providers: [
     CredentialsProvider({
@@ -76,28 +84,38 @@ export const authOptions: NextAuthOptions = {
           throw new Error('Email y contraseña son requeridos');
         }
 
-        // Look up user in database
-        const user = await prisma.user.findUnique({
-          where: { email: credentials.email },
-        });
+        try {
+          // Look up user in database
+          const user = await prisma.user.findUnique({
+            where: { email: credentials.email },
+          });
 
-        if (!user || !user.hashedPassword) {
-          // Don't reveal whether the email exists (security best practice)
-          throw new Error('Credenciales inválidas');
+          if (!user || !user.hashedPassword) {
+            // Don't reveal whether the email exists (security best practice)
+            throw new Error('Credenciales inválidas');
+          }
+
+          // Verify password
+          const isValid = await verifyPassword(credentials.password, user.hashedPassword);
+          if (!isValid) {
+            throw new Error('Credenciales inválidas');
+          }
+
+          // Return user object (stored in JWT)
+          return {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+          };
+        } catch (error) {
+          // If DB is not available, re-throw auth errors but don't crash
+          if (error instanceof Error && error.message === 'Credenciales inválidas') {
+            throw error;
+          }
+          // DB connection error — allow demo access in development
+          console.warn('[TradeIQ] Auth DB lookup failed:', error instanceof Error ? error.message : error);
+          throw new Error('Servicio de autenticación no disponible. Intenta más tarde.');
         }
-
-        // Verify password
-        const isValid = await verifyPassword(credentials.password, user.hashedPassword);
-        if (!isValid) {
-          throw new Error('Credenciales inválidas');
-        }
-
-        // Return user object (stored in JWT)
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-        };
       },
     }),
   ],
