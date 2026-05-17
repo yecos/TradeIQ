@@ -452,12 +452,12 @@ export default function TradeIQDashboard() {
           </div>
 
           {/* Current Symbol Info */}
-          {currentQuote && (
+          {currentQuote && currentQuote.price != null && (
             <div className="flex items-center gap-3">
               <span className="text-sm font-bold">{currentQuote.symbol}</span>
               <span className="text-sm font-mono">${currentQuote.price >= 1 ? currentQuote.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : currentQuote.price.toFixed(4)}</span>
-              <span className={`text-xs font-mono ${currentQuote.change >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                {currentQuote.change >= 0 ? '+' : ''}{currentQuote.changePercent.toFixed(2)}%
+              <span className={`text-xs font-mono ${(currentQuote.change ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                {(currentQuote.change ?? 0) >= 0 ? '+' : ''}{(currentQuote.changePercent ?? 0).toFixed(2)}%
               </span>
             </div>
           )}
@@ -540,12 +540,12 @@ export default function TradeIQDashboard() {
                 </button>
               ))}
               <div className="ml-auto flex items-center gap-2">
-                {currentQuote && (
+                {currentQuote && currentQuote.price != null && (
                   <span className="text-[10px] text-gray-500">
-                    O: <span className="text-gray-300">${currentQuote.open >= 1 ? currentQuote.open.toFixed(2) : currentQuote.open.toFixed(4)}</span>
-                    {' '}H: <span className="text-gray-300">${currentQuote.high >= 1 ? currentQuote.high.toFixed(2) : currentQuote.high.toFixed(4)}</span>
-                    {' '}L: <span className="text-gray-300">${currentQuote.low >= 1 ? currentQuote.low.toFixed(2) : currentQuote.low.toFixed(4)}</span>
-                    {' '}C: <span className={currentQuote.change >= 0 ? 'text-emerald-400' : 'text-red-400'}>${currentQuote.price >= 1 ? currentQuote.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : currentQuote.price.toFixed(4)}</span>
+                    O: <span className="text-gray-300">${(currentQuote.open ?? 0) >= 1 ? (currentQuote.open ?? 0).toFixed(2) : (currentQuote.open ?? 0).toFixed(4)}</span>
+                    {' '}H: <span className="text-gray-300">${(currentQuote.high ?? 0) >= 1 ? (currentQuote.high ?? 0).toFixed(2) : (currentQuote.high ?? 0).toFixed(4)}</span>
+                    {' '}L: <span className="text-gray-300">${(currentQuote.low ?? 0) >= 1 ? (currentQuote.low ?? 0).toFixed(2) : (currentQuote.low ?? 0).toFixed(4)}</span>
+                    {' '}C: <span className={(currentQuote.change ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}>${currentQuote.price >= 1 ? currentQuote.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : currentQuote.price.toFixed(4)}</span>
                   </span>
                 )}
               </div>
@@ -591,26 +591,26 @@ export default function TradeIQDashboard() {
               {/* R:R */}
               <div>
                 <p className="text-sm font-bold font-mono text-white">
-                  {activeConfluence.riskReward.toFixed(2)}
+                  {(activeConfluence.riskReward ?? 0).toFixed(2)}
                 </p>
                 <p className="text-[10px] text-gray-500">Riesgo:Beneficio</p>
               </div>
 
               {/* Entry */}
               <div>
-                <p className="text-sm font-mono text-white">${activeConfluence.entryPrice.toFixed(2)}</p>
+                <p className="text-sm font-mono text-white">${(activeConfluence.entryPrice ?? 0).toFixed(2)}</p>
                 <p className="text-[10px] text-gray-500">Entrada</p>
               </div>
 
               {/* SL */}
               <div>
-                <p className="text-sm font-mono text-red-400">${activeConfluence.stopLoss.toFixed(2)}</p>
+                <p className="text-sm font-mono text-red-400">${(activeConfluence.stopLoss ?? 0).toFixed(2)}</p>
                 <p className="text-[10px] text-gray-500">Stop Loss</p>
               </div>
 
               {/* TP */}
               <div>
-                <p className="text-sm font-mono text-emerald-400">${activeConfluence.takeProfit.toFixed(2)}</p>
+                <p className="text-sm font-mono text-emerald-400">${(activeConfluence.takeProfit ?? 0).toFixed(2)}</p>
                 <p className="text-[10px] text-gray-500">Take Profit</p>
               </div>
 

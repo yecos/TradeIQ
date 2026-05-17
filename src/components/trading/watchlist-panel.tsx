@@ -20,7 +20,8 @@ interface WatchlistPanelProps {
  * Format price with appropriate decimal precision.
  * BTC → "$103,245.67", XRP → "$0.5523", DOGE → "$0.162500"
  */
-function formatWatchlistPrice(price: number): string {
+function formatWatchlistPrice(price: number | null | undefined): string {
+  if (price == null) return '—';
   if (price >= 1000) return price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   if (price >= 1) return price.toFixed(4);
   if (price >= 0.01) return price.toFixed(5);
@@ -71,7 +72,7 @@ export function WatchlistPanel({ quotes, isLoading }: WatchlistPanelProps) {
                 <p className="text-xs font-mono text-white">${formatWatchlistPrice(q.price)}</p>
                 <div className={`flex items-center gap-0.5 text-[10px] ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
                   {isPositive ? <TrendingUp className="w-2.5 h-2.5" /> : <TrendingDown className="w-2.5 h-2.5" />}
-                  {isPositive ? '+' : ''}{q.changePercent.toFixed(2)}%
+                  {isPositive ? '+' : ''}{(q.changePercent ?? 0).toFixed(2)}%
                 </div>
               </div>
             </button>
