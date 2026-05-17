@@ -10,6 +10,7 @@ import { WatchlistPanel } from '@/components/trading/watchlist-panel';
 import { AnalysisPanel } from '@/components/trading/analysis-panel';
 import { JournalPanel } from '@/components/trading/journal-panel';
 import { BrokerPanel } from '@/components/trading/broker-panel';
+import { BacktestPanel } from '@/components/trading/backtest-panel';
 import type { Candle, Quote, TechnicalAnalysis, PatternAnalysis, VolumeAnalysis, ConfluenceResult } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -21,6 +22,7 @@ import {
   BookOpen,
   Link2,
   BarChart3,
+  FlaskConical,
   RefreshCw,
   TrendingUp,
   Target,
@@ -427,6 +429,13 @@ export default function TradeIQDashboard() {
                 )}
               </TabsTrigger>
               <TabsTrigger
+                value="backtest"
+                className="h-9 text-[10px] data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-emerald-400 data-[state=active]:text-emerald-400 data-[state=active]:shadow-none rounded-none px-3"
+              >
+                <FlaskConical className="w-3 h-3 mr-1" />
+                Backtest
+              </TabsTrigger>
+              <TabsTrigger
                 value="journal"
                 className="h-9 text-[10px] data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-emerald-400 data-[state=active]:text-emerald-400 data-[state=active]:shadow-none rounded-none px-3"
               >
@@ -465,6 +474,10 @@ export default function TradeIQDashboard() {
                     ))
                   )}
                 </div>
+              </TabsContent>
+
+              <TabsContent value="backtest" className="h-full m-0 p-3 overflow-y-auto custom-scrollbar">
+                <BacktestPanel />
               </TabsContent>
 
               <TabsContent value="journal" className="h-full m-0 p-3 overflow-y-auto custom-scrollbar">

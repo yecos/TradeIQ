@@ -6,6 +6,26 @@ El formato se basa en [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 
 ---
 
+## [0.7.0] - 2026-05-17
+
+### Agregado
+- **FEATURE**: Motor de Backtesting completo para validar estrategias con datos históricos
+  - `src/lib/backtest/engine.ts` — Walk-forward engine que simula trades con el motor de confluencia
+  - `src/lib/backtest/metrics.ts` — Métricas: Win Rate, Profit Factor, Sharpe Ratio, Max Drawdown, P&L
+  - `src/lib/backtest/types.ts` — Tipos: BacktestConfig, BacktestTrade, BacktestResult, EquityPoint
+- **FEATURE**: API endpoint `/api/backtest` — Ejecuta backtest con configuración personalizable
+- **FEATURE**: Componente `BacktestPanel` — UI completa para configurar y visualizar resultados
+  - Selector de vectores, confluencia mínima, capital inicial
+  - Grid de métricas clave (P&L, Win Rate, Profit Factor, Drawdown, Sharpe, Trades)
+  - Desglose por dirección (LONG vs SHORT), lista de últimos trades
+- **FEATURE**: Tab "Backtest" agregado al panel derecho del dashboard
+- **FEATURE**: 10 nuevos tests de backtesting (56 total)
+
+### Cambios
+- **CHANGE**: page.tsx actualizado con nueva tab "Backtest" y import de BacktestPanel + FlaskConical icon
+
+---
+
 ## [0.6.0] - 2026-05-17
 
 ### Agregado
