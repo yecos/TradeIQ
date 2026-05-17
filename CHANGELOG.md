@@ -6,6 +6,27 @@ El formato se basa en [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 
 ---
 
+## [0.6.0] - 2026-05-17
+
+### Agregado
+- **FEATURE**: Provider Pattern para fuentes de datos de mercado (ADR-002 implementado)
+  - `src/lib/data/market-data-interface.ts` — Interfaz `MarketDataProvider` + `DataCache` con TTL
+  - `src/lib/data/mock-provider.ts` — Datos simulados (refactorizado de market-data.ts)
+  - `src/lib/data/polygon-provider.ts` — Datos reales via Polygon.io REST API
+  - `src/lib/data/provider-factory.ts` — Selección automática: Polygon si hay API key, Mock si no
+- **FEATURE**: PolygonProvider con rate limiting (5 calls/min), caché con TTL (60s quotes, 5min candles), retry en 429
+- **FEATURE**: API endpoint `/api/market/search?q=` para búsqueda de símbolos
+- **FEATURE**: 29 nuevos tests (46 total): MockProvider (20), DataCache, Provider Factory (9)
+- **FEATURE**: Tipo `SymbolInfo` agregado a types.ts
+
+### Cambios
+- **CHANGE**: `src/lib/market-data.ts` convertido a thin wrapper que delega al provider factory
+- **CHANGE**: Cero breaking changes — todas las importaciones existentes siguen funcionando
+- **CHANGE**: `.env.example` actualizado con instrucciones de Polygon.io
+- **CHORE**: Sin `POLYGON_API_KEY` la app funciona idéntica a antes (MockProvider)
+
+---
+
 ## [0.5.0] - 2026-05-17
 
 ### Agregado

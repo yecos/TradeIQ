@@ -22,6 +22,14 @@ export interface Quote {
   marketCap?: number;
 }
 
+export interface SymbolInfo {
+  symbol: string;
+  name: string;
+  type: string; // 'stock', 'etf', 'crypto', etc.
+  exchange: string;
+  currency: string;
+}
+
 // Vector Types
 export type VectorCategory = 'technical' | 'pattern' | 'volume' | 'news' | 'sentiment' | 'macro';
 
