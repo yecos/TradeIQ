@@ -15,13 +15,14 @@ import { PolygonProvider } from './polygon-provider';
  */
 
 let providerInstance: MarketDataProvider | null = null;
+let fallbackToMock = false;
 
 export function getMarketDataProvider(): MarketDataProvider {
   if (providerInstance) return providerInstance;
 
   const polygonApiKey = process.env.POLYGON_API_KEY;
 
-  if (polygonApiKey && polygonApiKey.length > 0) {
+  if (polygonApiKey && polygonApiKey.length > 0 && !fallbackToMock) {
     const cache = new DataCache(60_000); // Default 60s TTL
     providerInstance = new PolygonProvider(polygonApiKey, cache);
     console.warn(`[TradeIQ] Using Polygon.io provider (real market data)`);
@@ -34,10 +35,29 @@ export function getMarketDataProvider(): MarketDataProvider {
 }
 
 /**
+ * Fallback to mock provider — called when Polygon API fails repeatedly.
+ */
+export function enableFallback(): void {
+  if (!fallbackToMock) {
+    console.warn('[TradeIQ] Polygon API failed, falling back to Mock provider');
+    fallbackToMock = true;
+    providerInstance = new MockProvider();
+  }
+}
+
+/**
+ * Check if currently in fallback mode.
+ */
+export function isFallbackActive(): boolean {
+  return fallbackToMock;
+}
+
+/**
  * Reset the provider singleton — useful for testing or when API key changes.
  */
 export function resetProvider(): void {
   providerInstance = null;
+  fallbackToMock = false;
 }
 
 /**
@@ -45,7 +65,7 @@ export function resetProvider(): void {
  */
 export function isRealDataAvailable(): boolean {
   const apiKey = process.env.POLYGON_API_KEY;
-  return Boolean(apiKey && apiKey.length > 0);
+  return Boolean(apiKey && apiKey.length > 0) && !fallbackToMock;
 }
 
 /**

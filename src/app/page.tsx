@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useAppStore } from '@/lib/store';
 import { TradingChart } from '@/components/trading/trading-chart';
@@ -26,6 +26,9 @@ import {
   RefreshCw,
   TrendingUp,
   Target,
+  Wifi,
+  WifiOff,
+  X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -52,6 +55,14 @@ interface BrokerConfig {
   isActive: boolean;
 }
 
+interface SearchResult {
+  symbol: string;
+  name: string;
+  type: string;
+  exchange: string;
+  currency: string;
+}
+
 export default function TradeIQDashboard() {
   const {
     selectedSymbol,
@@ -73,6 +84,11 @@ export default function TradeIQDashboard() {
   const [brokerConfig, setBrokerConfig] = useState<BrokerConfig | null>(null);
   const [activeTab, setActiveTab] = useState('analysis');
   const [searchSymbol, setSearchSymbol] = useState('');
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [showSearchDropdown, setShowSearchDropdown] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
+  const searchTimeout = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   // Only show analysis if it matches the current symbol
   const activeTechnical = analysisForSymbol === selectedSymbol ? technical : null;
@@ -80,7 +96,18 @@ export default function TradeIQDashboard() {
   const activeVolume = analysisForSymbol === selectedSymbol ? volumeAnalysis : null;
   const activeConfluence = analysisForSymbol === selectedSymbol ? confluence : null;
 
-  // Fetch quotes using TanStack Query
+  // Fetch market status (provider info)
+  const { data: marketStatus } = useQuery({
+    queryKey: ['marketStatus'],
+    queryFn: async () => {
+      const res = await fetch('/api/market/status');
+      return res.json() as Promise<{ provider: string; isRealData: boolean; isFallback: boolean; timestamp: number }>;
+    },
+    refetchInterval: 60000,
+    staleTime: 30000,
+  });
+
+  // Fetch quotes using TanStack Query — refetch every 15s for near-real-time
   const { data: quotes = [], isLoading: isLoadingQuotes, refetch: refetchQuotes } = useQuery({
     queryKey: ['quotes', watchlist],
     queryFn: async () => {
@@ -88,10 +115,10 @@ export default function TradeIQDashboard() {
       const data = await res.json();
       return (data.quotes || []) as Quote[];
     },
-    refetchInterval: 30000,
+    refetchInterval: 15000, // 15s for near-real-time updates
   });
 
-  // Fetch candles using TanStack Query
+  // Fetch candles using TanStack Query — refetch every 60s
   const { data: candles = [] } = useQuery({
     queryKey: ['candles', selectedSymbol],
     queryFn: async () => {
@@ -99,7 +126,54 @@ export default function TradeIQDashboard() {
       const data = await res.json();
       return (data.candles || []) as Candle[];
     },
+    refetchInterval: 60000, // 1min for candle updates
   });
+
+  // Symbol search with debounce
+  const searchSymbols = useCallback(async (query: string) => {
+    if (query.length < 1) {
+      setSearchResults([]);
+      setShowSearchDropdown(false);
+      return;
+    }
+
+    setIsSearching(true);
+    try {
+      const res = await fetch(`/api/market/search?q=${encodeURIComponent(query)}`);
+      const data = await res.json();
+      setSearchResults(data.results || []);
+      setShowSearchDropdown(true);
+    } catch {
+      setSearchResults([]);
+    }
+    setIsSearching(false);
+  }, []);
+
+  // Debounced search input
+  const handleSearchChange = useCallback((value: string) => {
+    setSearchSymbol(value.toUpperCase());
+    if (searchTimeout.current) clearTimeout(searchTimeout.current);
+    searchTimeout.current = setTimeout(() => searchSymbols(value.toUpperCase()), 300);
+  }, [searchSymbols]);
+
+  // Select a symbol from search or direct input
+  const selectSymbol = useCallback((symbol: string) => {
+    useAppStore.getState().setSelectedSymbol(symbol);
+    setSearchSymbol('');
+    setSearchResults([]);
+    setShowSearchDropdown(false);
+  }, []);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setShowSearchDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Run analysis
   const runAnalysis = useCallback(async () => {
@@ -216,6 +290,7 @@ export default function TradeIQDashboard() {
 
   // Current quote
   const currentQuote = quotes.find(q => q.symbol === selectedSymbol);
+  const isLive = marketStatus?.isRealData && !marketStatus?.isFallback;
 
   return (
     <div className="h-screen flex flex-col trading-bg text-white overflow-hidden">
@@ -230,26 +305,69 @@ export default function TradeIQDashboard() {
             <Badge className="text-[8px] border-0 bg-emerald-500/10 text-emerald-400">BETA</Badge>
           </div>
 
-          {/* Symbol Search */}
-          <div className="relative ml-4">
+          {/* Symbol Search with Autocomplete */}
+          <div className="relative ml-4" ref={searchRef}>
             <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-500" />
             <input
               type="text"
               placeholder="Buscar símbolo..."
-              className="h-7 w-40 pl-7 pr-2 text-xs bg-white/5 border border-white/10 rounded-md focus:outline-none focus:border-emerald-500/50 text-white placeholder-gray-500"
+              className="h-7 w-48 pl-7 pr-7 text-xs bg-white/5 border border-white/10 rounded-md focus:outline-none focus:border-emerald-500/50 text-white placeholder-gray-500"
               value={searchSymbol}
-              onChange={(e) => setSearchSymbol(e.target.value.toUpperCase())}
+              onChange={(e) => handleSearchChange(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && searchSymbol) {
-                  useAppStore.getState().setSelectedSymbol(searchSymbol);
-                  setSearchSymbol('');
+                  selectSymbol(searchSymbol);
                 }
               }}
+              onFocus={() => searchResults.length > 0 && setShowSearchDropdown(true)}
             />
+            {searchSymbol && (
+              <button
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300"
+                onClick={() => { setSearchSymbol(''); setSearchResults([]); setShowSearchDropdown(false); }}
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+
+            {/* Search Dropdown */}
+            {showSearchDropdown && (searchResults.length > 0 || isSearching) && (
+              <div className="absolute top-full left-0 mt-1 w-64 bg-[#1a1a2e] border border-white/10 rounded-lg shadow-xl z-50 max-h-60 overflow-y-auto custom-scrollbar">
+                {isSearching ? (
+                  <div className="p-3 text-xs text-gray-500 text-center">Buscando...</div>
+                ) : (
+                  searchResults.map((result) => (
+                    <button
+                      key={result.symbol}
+                      className="w-full flex items-center justify-between px-3 py-2 hover:bg-white/5 text-left transition-colors"
+                      onClick={() => selectSymbol(result.symbol)}
+                    >
+                      <div>
+                        <span className="text-xs font-bold text-white">{result.symbol}</span>
+                        <span className="text-[10px] text-gray-500 ml-2">{result.name}</span>
+                      </div>
+                      <span className="text-[9px] text-gray-600 uppercase">{result.type}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
           </div>
         </div>
 
         <div className="flex items-center gap-3">
+          {/* Data Provider Badge */}
+          <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-white/10 bg-white/5">
+            {isLive ? (
+              <Wifi className="w-3 h-3 text-emerald-400" />
+            ) : (
+              <WifiOff className="w-3 h-3 text-yellow-500" />
+            )}
+            <span className={`text-[9px] font-medium ${isLive ? 'text-emerald-400' : 'text-yellow-500'}`}>
+              {isLive ? 'LIVE' : marketStatus?.isFallback ? 'FALLBACK' : 'MOCK'}
+            </span>
+          </div>
+
           {/* Current Symbol Info */}
           {currentQuote && (
             <div className="flex items-center gap-3">

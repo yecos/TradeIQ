@@ -61,7 +61,35 @@ export class PolygonProvider implements MarketDataProvider {
     const cached = this.cache.get<Quote>(cacheKey);
     if (cached) return cached;
 
-    // Get previous close for change calculation
+    // Try the snapshot endpoint first (near real-time, single API call)
+    try {
+      const snapshot = await this.fetchFromApi<PolygonSnapshotResponse>(
+        `/v2/snapshot/locale/us/markets/stocks/tickers/${symbol}`
+      );
+
+      if (snapshot.results) {
+        const s = snapshot.results;
+        const prevClose = s.prevDay?.c ?? s.day?.o ?? 0;
+        const quote: Quote = {
+          symbol,
+          name: await this.getSymbolName(symbol),
+          price: s.day?.c ?? s.min?.c ?? s.prevDay?.c ?? 0,
+          change: Math.round(((s.day?.c ?? 0) - prevClose) * 100) / 100,
+          changePercent: prevClose > 0 ? Math.round((((s.day?.c ?? 0) - prevClose) / prevClose) * 10000) / 100 : 0,
+          volume: s.day?.v ?? 0,
+          high: s.day?.h ?? 0,
+          low: s.day?.l ?? 0,
+          open: s.day?.o ?? 0,
+          prevClose,
+        };
+        this.cache.set(cacheKey, quote, 60_000); // 60s cache
+        return quote;
+      }
+    } catch {
+      // Snapshot not available (free tier or after hours), fall through
+    }
+
+    // Fallback: previous close aggregate
     const data = await this.fetchFromApi<PolygonPrevCloseResponse>(
       `/v2/aggs/ticker/${symbol}/prev?adjusted=true`
     );
@@ -71,17 +99,19 @@ export class PolygonProvider implements MarketDataProvider {
     }
 
     const result = data.results[0];
+    // For prev close endpoint: result.c = prev day close, result.o = prev day open
+    // We use this as the "current" price during after-hours
     const quote: Quote = {
       symbol,
       name: await this.getSymbolName(symbol),
-      price: result.c, // close price
+      price: result.c,
       change: Math.round((result.c - result.o) * 100) / 100,
-      changePercent: Math.round(((result.c - result.o) / result.o) * 10000) / 100,
+      changePercent: result.o > 0 ? Math.round(((result.c - result.o) / result.o) * 10000) / 100 : 0,
       volume: result.v,
       high: result.h,
       low: result.l,
       open: result.o,
-      prevClose: result.o, // Previous day's close = today's open reference
+      prevClose: result.o, // Best available reference
     };
 
     this.cache.set(cacheKey, quote, 60_000); // 60s cache
@@ -272,5 +302,38 @@ interface PolygonTickerDetailsResponse {
     list_date: string | null;
     weighted_shares_outstanding: number | null;
   };
+  status: string;
+}
+
+interface PolygonSnapshotDay {
+  c: number;  // Close price
+  h: number;  // High price
+  l: number;  // Low price
+  o: number;  // Open price
+  v: number;  // Volume
+  vw: number; // Volume weighted average price
+}
+
+interface PolygonSnapshotMin {
+  c: number;
+  h: number;
+  l: number;
+  o: number;
+  v: number;
+}
+
+interface PolygonSnapshotResults {
+  day?: PolygonSnapshotDay;
+  min?: PolygonSnapshotMin;
+  prevDay?: PolygonSnapshotDay;
+  ticker: string;
+  todaysChange: number;
+  todaysChangePerc: number;
+  updated: number;
+}
+
+interface PolygonSnapshotResponse {
+  request_id: string;
+  results: PolygonSnapshotResults | null;
   status: string;
 }

@@ -28,5 +28,5 @@ export async function getMultipleQuotes(symbols: string[]): Promise<Quote[]> {
 }
 
 // Re-export provider utilities for components that need them
-export { getProviderName, isRealDataAvailable } from './data/provider-factory';
+export { getProviderName, isRealDataAvailable, isFallbackActive } from './data/provider-factory';
 export type { MarketDataProvider, SymbolInfo } from './data/market-data-interface';

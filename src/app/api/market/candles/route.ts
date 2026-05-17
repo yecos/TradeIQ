@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCandles } from '@/lib/market-data';
+import { enableFallback } from '@/lib/data/provider-factory';
+import { MockProvider } from '@/lib/data/mock-provider';
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
@@ -9,7 +11,13 @@ export async function GET(request: NextRequest) {
   try {
     const candles = await getCandles(symbol, days);
     return NextResponse.json({ symbol, candles });
-  } catch {
-    return NextResponse.json({ error: 'Failed to fetch candles' }, { status: 500 });
+  } catch (error) {
+    console.warn(`[TradeIQ] Failed to fetch candles for ${symbol}, falling back to mock:`, error);
+    enableFallback();
+
+    // Fallback to mock data
+    const mockProvider = new MockProvider();
+    const candles = await mockProvider.getCandles(symbol, days);
+    return NextResponse.json({ symbol, candles, fallback: true });
   }
 }
