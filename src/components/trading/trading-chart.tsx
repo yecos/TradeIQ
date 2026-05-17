@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useRef, useMemo } from 'react';
+import { useEffect, useRef, useMemo, useState } from 'react';
 import { createChart, ColorType, CandlestickSeries, HistogramSeries } from 'lightweight-charts';
 import type { Time, IChartApi, ISeriesApi } from 'lightweight-charts';
 import type { Candle } from '@/lib/types';
 import { useRealtimeCandles } from '@/hooks/use-realtime-candles';
+import { utcToLocal, getTimezoneDisplay } from '@/lib/timezone';
 
 interface TradingChartProps {
   candles: Candle[];
@@ -35,13 +36,18 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
     onWSStateChange?.(wsState, isRealtime, latencyMs);
   }, [wsState, isRealtime, latencyMs, onWSStateChange]);
 
-  // Memoize chart data transformation
+  // Timezone display label (computed once, not reactive)
+  const [tzDisplay] = useState(() => getTimezoneDisplay());
+
+  // Memoize chart data transformation — convert UTC timestamps to local time
+  // so the chart displays times in the user's timezone.
+  // Internal data (hooks, WS merge) stays in UTC; only the display layer adjusts.
   const chartData = useMemo(() => {
     const data = realtimeCandles;
     if (!data.length) return { candles: [], volume: [] };
 
     const candlesMapped = data.map(c => ({
-      time: c.time as Time,
+      time: utcToLocal(c.time) as Time,
       open: c.open,
       high: c.high,
       low: c.low,
@@ -49,7 +55,7 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
     }));
 
     const volumeMapped = data.map(c => ({
-      time: c.time as Time,
+      time: utcToLocal(c.time) as Time,
       value: c.volume,
       color: c.close >= c.open ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)',
     }));
@@ -248,6 +254,11 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
           <span className="text-[9px] text-yellow-400 font-medium">CONECTANDO</span>
         </div>
       ) : null}
+
+      {/* Timezone indicator */}
+      <div className="absolute bottom-2 right-2 bg-black/40 backdrop-blur-sm rounded px-1.5 py-0.5 z-10">
+        <span className="text-[8px] text-gray-500 font-mono">{tzDisplay}</span>
+      </div>
     </div>
   );
 }
