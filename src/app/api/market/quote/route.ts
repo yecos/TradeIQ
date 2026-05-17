@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getQuote, getMultipleQuotes } from '@/lib/market-data';
-import { enableFallback } from '@/lib/data/provider-factory';
 import { MockProvider } from '@/lib/data/mock-provider';
 
 export async function GET(request: NextRequest) {
@@ -20,7 +19,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Provide symbol or symbols parameter' }, { status: 400 });
   } catch (error) {
     console.warn('[TradeIQ] Failed to fetch quotes, falling back to mock:', error);
-    enableFallback();
 
     // Fallback to mock data
     const mockProvider = new MockProvider();

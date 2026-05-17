@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getProviderName, isRealDataAvailable, isFallbackActive } from '@/lib/data/provider-factory';
+import { getProviderName, isRealDataAvailable, isFallbackActive, getActiveProviders } from '@/lib/data/provider-factory';
 
 export async function GET() {
   try {
@@ -7,6 +7,7 @@ export async function GET() {
       provider: getProviderName(),
       isRealData: isRealDataAvailable(),
       isFallback: isFallbackActive(),
+      activeProviders: getActiveProviders(),
       timestamp: Date.now(),
     });
   } catch {
@@ -14,6 +15,7 @@ export async function GET() {
       provider: 'mock',
       isRealData: false,
       isFallback: false,
+      activeProviders: ['mock'],
       timestamp: Date.now(),
     });
   }

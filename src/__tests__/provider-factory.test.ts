@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import { getMarketDataProvider, resetProvider, isRealDataAvailable, getProviderName } from '@/lib/data/provider-factory';
-import { MockProvider } from '@/lib/data/mock-provider';
-import { PolygonProvider } from '@/lib/data/polygon-provider';
+import { SmartProvider } from '@/lib/data/smart-provider';
 
 describe('Provider Factory', () => {
   const originalEnv = process.env;
@@ -17,39 +16,41 @@ describe('Provider Factory', () => {
   });
 
   describe('without POLYGON_API_KEY', () => {
-    it('should return MockProvider when no API key is set', () => {
+    it('should return SmartProvider when no API key is set', () => {
       delete process.env.POLYGON_API_KEY;
 
       const provider = getMarketDataProvider();
-      expect(provider).toBeInstanceOf(MockProvider);
+      expect(provider).toBeInstanceOf(SmartProvider);
     });
 
-    it('should return MockProvider when API key is empty string', () => {
-      process.env.POLYGON_API_KEY = '';
+    it('should report SmartProvider without Polygon key', () => {
+      delete process.env.POLYGON_API_KEY;
 
       const provider = getMarketDataProvider();
-      expect(provider).toBeInstanceOf(MockProvider);
+      expect(provider.hasPolygon()).toBe(false);
     });
 
-    it('should report real data as not available', () => {
+    it('should report real data as available (Binance is free)', () => {
       delete process.env.POLYGON_API_KEY;
 
-      expect(isRealDataAvailable()).toBe(false);
+      // Binance is always real, so isRealDataAvailable is true
+      expect(isRealDataAvailable()).toBe(true);
     });
 
-    it('should return "mock" as provider name', () => {
+    it('should return "smart" as provider name without Polygon', () => {
       delete process.env.POLYGON_API_KEY;
 
-      expect(getProviderName()).toBe('mock');
+      expect(getProviderName()).toBe('smart');
     });
   });
 
   describe('with POLYGON_API_KEY', () => {
-    it('should return PolygonProvider when API key is set', () => {
+    it('should return SmartProvider with Polygon enabled', () => {
       process.env.POLYGON_API_KEY = 'test_api_key_123';
 
       const provider = getMarketDataProvider();
-      expect(provider).toBeInstanceOf(PolygonProvider);
+      expect(provider).toBeInstanceOf(SmartProvider);
+      expect(provider.hasPolygon()).toBe(true);
     });
 
     it('should report real data as available', () => {
@@ -58,10 +59,10 @@ describe('Provider Factory', () => {
       expect(isRealDataAvailable()).toBe(true);
     });
 
-    it('should return "polygon" as provider name', () => {
+    it('should return "smart+polygon" as provider name', () => {
       process.env.POLYGON_API_KEY = 'test_api_key_123';
 
-      expect(getProviderName()).toBe('polygon');
+      expect(getProviderName()).toBe('smart+polygon');
     });
   });
 
@@ -82,7 +83,7 @@ describe('Provider Factory', () => {
       resetProvider();
       const provider2 = getMarketDataProvider();
 
-      // Different instances (both MockProvider, but different objects)
+      // Different instances
       expect(provider1).not.toBe(provider2);
     });
   });

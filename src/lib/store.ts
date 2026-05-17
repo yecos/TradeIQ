@@ -63,7 +63,7 @@ export const useAppStore = create<AppState>((set) => ({
   addSignal: (signal) => set((state) => ({ signals: [signal, ...state.signals].slice(0, 50) })),
   clearSignals: () => set({ signals: [] }),
 
-  watchlist: ['NVDA', 'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'META', 'SPY', 'QQQ', 'AMD'],
+  watchlist: ['BTC', 'ETH', 'NVDA', 'AAPL', 'SOL', 'MSFT', 'BNB', 'GOOGL', 'AMZN', 'TSLA', 'META', 'SPY', 'XRP', 'ADA', 'QQQ'],
   setWatchlist: (symbols) => set({ watchlist: symbols }),
 
   activePanel: 'analysis',

@@ -8,7 +8,8 @@ import type { MarketDataProvider, SymbolInfo } from './market-data-interface';
 export class MockProvider implements MarketDataProvider {
   readonly name = 'mock';
 
-  static readonly SYMBOL_SEEDS: Record<string, { base: number; vol: number; trend: number; name: string }> = {
+  static readonly SYMBOL_SEEDS: Record<string, { base: number; vol: number; trend: number; name: string; type?: string }> = {
+    // Stocks
     'AAPL': { base: 195, vol: 3.5, trend: 0.08, name: 'Apple Inc.' },
     'NVDA': { base: 880, vol: 18, trend: 0.15, name: 'NVIDIA Corporation' },
     'MSFT': { base: 420, vol: 5, trend: 0.06, name: 'Microsoft Corporation' },
@@ -16,9 +17,20 @@ export class MockProvider implements MarketDataProvider {
     'AMZN': { base: 185, vol: 4, trend: 0.09, name: 'Amazon.com Inc.' },
     'TSLA': { base: 245, vol: 12, trend: 0.12, name: 'Tesla Inc.' },
     'META': { base: 505, vol: 8, trend: 0.1, name: 'Meta Platforms Inc.' },
-    'SPY': { base: 520, vol: 4, trend: 0.04, name: 'S&P 500 ETF' },
-    'QQQ': { base: 445, vol: 4.5, trend: 0.06, name: 'Nasdaq 100 ETF' },
+    'SPY': { base: 520, vol: 4, trend: 0.04, name: 'S&P 500 ETF', type: 'etf' },
+    'QQQ': { base: 445, vol: 4.5, trend: 0.06, name: 'Nasdaq 100 ETF', type: 'etf' },
     'AMD': { base: 165, vol: 5, trend: 0.11, name: 'Advanced Micro Devices' },
+    // Crypto
+    'BTC': { base: 67000, vol: 1500, trend: 0.1, name: 'Bitcoin', type: 'crypto' },
+    'ETH': { base: 3500, vol: 120, trend: 0.09, name: 'Ethereum', type: 'crypto' },
+    'BNB': { base: 600, vol: 15, trend: 0.07, name: 'BNB', type: 'crypto' },
+    'SOL': { base: 170, vol: 8, trend: 0.12, name: 'Solana', type: 'crypto' },
+    'XRP': { base: 0.55, vol: 0.03, trend: 0.05, name: 'XRP', type: 'crypto' },
+    'ADA': { base: 0.48, vol: 0.02, trend: 0.06, name: 'Cardano', type: 'crypto' },
+    'DOGE': { base: 0.16, vol: 0.01, trend: 0.08, name: 'Dogecoin', type: 'crypto' },
+    'AVAX': { base: 38, vol: 2, trend: 0.09, name: 'Avalanche', type: 'crypto' },
+    'DOT': { base: 7.5, vol: 0.4, trend: 0.06, name: 'Polkadot', type: 'crypto' },
+    'LINK': { base: 15, vol: 0.8, trend: 0.08, name: 'Chainlink', type: 'crypto' },
   };
 
   async getCandles(symbol: string, days: number = 180): Promise<Candle[]> {
@@ -42,9 +54,9 @@ export class MockProvider implements MarketDataProvider {
         results.push({
           symbol,
           name: seed.name,
-          type: symbol === 'SPY' || symbol === 'QQQ' ? 'etf' : 'stock',
-          exchange: 'US',
-          currency: 'USD',
+          type: seed.type || 'stock',
+          exchange: seed.type === 'crypto' ? 'Binance' : 'US',
+          currency: seed.type === 'crypto' ? 'USDT' : 'USD',
         });
       }
     }
@@ -82,7 +94,9 @@ function generateRealisticCandles(symbol: string, days: number = 180): Candle[] 
     const lowExtra = Math.abs(seededRandom() * seed.vol * 0.5);
     const high = Math.max(open, close) + highExtra;
     const low = Math.min(open, close) - lowExtra;
-    const volume = Math.floor(50_000_000 + seededRandom() * 100_000_000);
+    const volume = seed.type === 'crypto'
+      ? Math.floor(1_000_000_000 + seededRandom() * 5_000_000_000)  // Crypto has higher volumes
+      : Math.floor(50_000_000 + seededRandom() * 100_000_000);
 
     candles.push({
       time,

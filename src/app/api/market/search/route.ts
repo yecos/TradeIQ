@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getMarketDataProvider, enableFallback } from '@/lib/data/provider-factory';
+import { getMarketDataProvider } from '@/lib/data/provider-factory';
 import { MockProvider } from '@/lib/data/mock-provider';
 
 export async function GET(request: NextRequest) {
@@ -16,7 +16,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ results, provider: provider.name });
   } catch (error) {
     console.warn('[TradeIQ] Search failed, falling back to mock:', error);
-    enableFallback();
 
     const mockProvider = new MockProvider();
     const results = await mockProvider.searchSymbols(query);

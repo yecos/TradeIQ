@@ -1,9 +1,10 @@
 /**
- * Market Data — thin wrapper that delegates to the appropriate provider.
+ * Market Data — thin wrapper that delegates to the SmartProvider.
  *
- * This module maintains the same public API as before (getCandles, getQuote,
- * getMultipleQuotes) but now delegates to either MockProvider or PolygonProvider
- * based on whether POLYGON_API_KEY is configured.
+ * The SmartProvider automatically routes:
+ * - Crypto symbols (BTC, ETH, etc.) → Binance (free, real-time)
+ * - Stock symbols (AAPL, NVDA, etc.) → Polygon (if API key) or Mock
+ * - Fallback → Mock for any failures
  *
  * Zero breaking changes — all existing code that imports from this module
  * continues to work exactly the same.
@@ -28,5 +29,6 @@ export async function getMultipleQuotes(symbols: string[]): Promise<Quote[]> {
 }
 
 // Re-export provider utilities for components that need them
-export { getProviderName, isRealDataAvailable, isFallbackActive } from './data/provider-factory';
+export { getProviderName, isRealDataAvailable, isFallbackActive, getActiveProviders } from './data/provider-factory';
+export { isCryptoSymbol } from './data/binance-provider';
 export type { MarketDataProvider, SymbolInfo } from './data/market-data-interface';

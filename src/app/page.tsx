@@ -101,7 +101,7 @@ export default function TradeIQDashboard() {
     queryKey: ['marketStatus'],
     queryFn: async () => {
       const res = await fetch('/api/market/status');
-      return res.json() as Promise<{ provider: string; isRealData: boolean; isFallback: boolean; timestamp: number }>;
+      return res.json() as Promise<{ provider: string; isRealData: boolean; isFallback: boolean; activeProviders: string[]; timestamp: number }>;
     },
     refetchInterval: 60000,
     staleTime: 30000,
@@ -291,6 +291,8 @@ export default function TradeIQDashboard() {
   // Current quote
   const currentQuote = quotes.find(q => q.symbol === selectedSymbol);
   const isLive = marketStatus?.isRealData && !marketStatus?.isFallback;
+  const hasBinance = marketStatus?.activeProviders?.includes('binance');
+  const hasPolygon = marketStatus?.activeProviders?.includes('polygon');
 
   return (
     <div className="h-screen flex flex-col trading-bg text-white overflow-hidden">
@@ -342,11 +344,20 @@ export default function TradeIQDashboard() {
                       className="w-full flex items-center justify-between px-3 py-2 hover:bg-white/5 text-left transition-colors"
                       onClick={() => selectSymbol(result.symbol)}
                     >
-                      <div>
-                        <span className="text-xs font-bold text-white">{result.symbol}</span>
-                        <span className="text-[10px] text-gray-500 ml-2">{result.name}</span>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[8px] px-1 py-0.5 rounded font-medium ${
+                          result.type === 'crypto' ? 'bg-yellow-500/20 text-yellow-400' :
+                          result.type === 'etf' ? 'bg-blue-500/20 text-blue-400' :
+                          'bg-white/10 text-gray-400'
+                        }`}>
+                          {result.type === 'crypto' ? 'CRYPTO' : result.type === 'etf' ? 'ETF' : 'STOCK'}
+                        </span>
+                        <div>
+                          <span className="text-xs font-bold text-white">{result.symbol}</span>
+                          <span className="text-[10px] text-gray-500 ml-2">{result.name}</span>
+                        </div>
                       </div>
-                      <span className="text-[9px] text-gray-600 uppercase">{result.type}</span>
+                      <span className="text-[9px] text-gray-600">{result.exchange}</span>
                     </button>
                   ))
                 )}
@@ -357,15 +368,29 @@ export default function TradeIQDashboard() {
 
         <div className="flex items-center gap-3">
           {/* Data Provider Badge */}
-          <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-white/10 bg-white/5">
+          <div className="flex items-center gap-1 px-2 py-0.5 rounded-full border border-white/10 bg-white/5">
             {isLive ? (
               <Wifi className="w-3 h-3 text-emerald-400" />
             ) : (
               <WifiOff className="w-3 h-3 text-yellow-500" />
             )}
-            <span className={`text-[9px] font-medium ${isLive ? 'text-emerald-400' : 'text-yellow-500'}`}>
-              {isLive ? 'LIVE' : marketStatus?.isFallback ? 'FALLBACK' : 'MOCK'}
-            </span>
+            <div className="flex items-center gap-1">
+              {hasBinance && (
+                <span className="text-[9px] font-medium text-emerald-400">BIN</span>
+              )}
+              {hasBinance && hasPolygon && (
+                <span className="text-[8px] text-gray-600">+</span>
+              )}
+              {hasPolygon && (
+                <span className="text-[9px] font-medium text-blue-400">POL</span>
+              )}
+              {!hasBinance && !hasPolygon && (
+                <span className="text-[9px] font-medium text-yellow-500">MOCK</span>
+              )}
+              {marketStatus?.isFallback && (
+                <span className="text-[9px] text-red-400">FB</span>
+              )}
+            </div>
           </div>
 
           {/* Current Symbol Info */}

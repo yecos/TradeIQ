@@ -1,47 +1,46 @@
-import type { MarketDataProvider } from './market-data-interface';
 import { DataCache } from './market-data-interface';
 import { MockProvider } from './mock-provider';
-import { PolygonProvider } from './polygon-provider';
+import { SmartProvider } from './smart-provider';
+import { BinanceProvider } from './binance-provider';
 
 /**
- * Provider Factory — selects the appropriate market data provider.
+ * Provider Factory — creates the appropriate market data provider.
  *
- * Selection logic:
- * 1. If POLYGON_API_KEY is set → PolygonProvider (real data)
- * 2. Otherwise → MockProvider (simulated data)
+ * Strategy:
+ * - SmartProvider is now the default (routes crypto→Binance, stocks→Polygon/Mock)
+ * - Binance is always free and available (no API key needed)
+ * - Polygon is used for stocks if POLYGON_API_KEY is set
+ * - Mock is always the fallback
  *
  * The factory uses a singleton pattern to avoid creating multiple instances.
- * Each provider gets its own DataCache instance.
  */
 
-let providerInstance: MarketDataProvider | null = null;
+let providerInstance: SmartProvider | null = null;
 let fallbackToMock = false;
 
-export function getMarketDataProvider(): MarketDataProvider {
-  if (providerInstance) return providerInstance;
+export function getMarketDataProvider(): SmartProvider {
+  if (providerInstance && !fallbackToMock) return providerInstance;
 
   const polygonApiKey = process.env.POLYGON_API_KEY;
 
-  if (polygonApiKey && polygonApiKey.length > 0 && !fallbackToMock) {
-    const cache = new DataCache(60_000); // Default 60s TTL
-    providerInstance = new PolygonProvider(polygonApiKey, cache);
-    console.warn(`[TradeIQ] Using Polygon.io provider (real market data)`);
+  providerInstance = new SmartProvider(polygonApiKey || undefined);
+
+  if (polygonApiKey && polygonApiKey.length > 0) {
+    console.warn(`[TradeIQ] SmartProvider active: Binance (crypto) + Polygon (stocks) + Mock (fallback)`);
   } else {
-    providerInstance = new MockProvider();
-    console.warn(`[TradeIQ] Using Mock provider (simulated data). Set POLYGON_API_KEY for real data.`);
+    console.warn(`[TradeIQ] SmartProvider active: Binance (crypto) + Mock (stocks). Set POLYGON_API_KEY for real stock data.`);
   }
 
   return providerInstance;
 }
 
 /**
- * Fallback to mock provider — called when Polygon API fails repeatedly.
+ * Fallback to mock provider — called when APIs fail repeatedly.
  */
 export function enableFallback(): void {
   if (!fallbackToMock) {
-    console.warn('[TradeIQ] Polygon API failed, falling back to Mock provider');
+    console.warn('[TradeIQ] APIs failed, falling back to Mock provider');
     fallbackToMock = true;
-    providerInstance = new MockProvider();
   }
 }
 
@@ -61,16 +60,32 @@ export function resetProvider(): void {
 }
 
 /**
- * Check if real market data is available (Polygon API key configured).
+ * Check if real market data is available.
+ * Binance is always real (free), so this is true unless in fallback mode.
  */
 export function isRealDataAvailable(): boolean {
-  const apiKey = process.env.POLYGON_API_KEY;
-  return Boolean(apiKey && apiKey.length > 0) && !fallbackToMock;
+  return !fallbackToMock;
 }
 
 /**
  * Get the name of the current provider for display purposes.
  */
 export function getProviderName(): string {
-  return getMarketDataProvider().name;
+  if (fallbackToMock) return 'mock';
+  const provider = getMarketDataProvider();
+  return provider.hasPolygon() ? 'smart+polygon' : 'smart';
 }
+
+/**
+ * Get list of active providers for the UI.
+ */
+export function getActiveProviders(): string[] {
+  if (fallbackToMock) return ['mock'];
+  return getMarketDataProvider().getActiveProviders();
+}
+
+// Re-export for direct usage
+export { SmartProvider } from './smart-provider';
+export { BinanceProvider, isCryptoSymbol } from './binance-provider';
+export { MockProvider } from './mock-provider';
+export { PolygonProvider } from './polygon-provider';
