@@ -13,6 +13,8 @@ import { BrokerPanel } from '@/components/trading/broker-panel';
 import { BacktestPanel } from '@/components/trading/backtest-panel';
 import { PortfolioPanel } from '@/components/trading/portfolio-panel';
 import { AlertPanel } from '@/components/trading/alert-panel';
+import { AIAssistantPanel } from '@/components/trading/ai-assistant-panel';
+import { AITradeTrackerPanel } from '@/components/trading/ai-trade-tracker-panel';
 import { MobileNav } from '@/components/trading/mobile-nav';
 import type { Candle, Quote, TechnicalAnalysis, PatternAnalysis, VolumeAnalysis, NewsAnalysis, SentimentAnalysis, MacroAnalysis, ConfluenceResult } from '@/lib/types';
 import type { WSConnectionState } from '@/lib/data/binance-ws';
@@ -39,6 +41,8 @@ import {
   List,
   AlertTriangle,
   Bell,
+  Bot,
+  Crosshair,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { LoadingScreen } from '@/components/loading-screen';
@@ -390,6 +394,20 @@ export default function TradeIQDashboard() {
           <Bell className="w-3 h-3 mr-1" />
           Alertas
         </TabsTrigger>
+        <TabsTrigger
+          value="ai"
+          className="h-9 text-[10px] data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-violet-400 data-[state=active]:text-violet-400 data-[state=active]:shadow-none rounded-none px-3 flex-shrink-0"
+        >
+          <Bot className="w-3 h-3 mr-1" />
+          IA
+        </TabsTrigger>
+        <TabsTrigger
+          value="tracker"
+          className="h-9 text-[10px] data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-amber-400 data-[state=active]:text-amber-400 data-[state=active]:shadow-none rounded-none px-3 flex-shrink-0"
+        >
+          <Crosshair className="w-3 h-3 mr-1" />
+          Tracker
+        </TabsTrigger>
       </TabsList>
 
       <div className="flex-1 overflow-hidden">
@@ -442,6 +460,25 @@ export default function TradeIQDashboard() {
 
         <TabsContent value="alerts" className="h-full m-0 p-3 overflow-y-auto custom-scrollbar">
           <AlertPanel watchlist={watchlist} brokerConnected={brokerConfig?.isActive ?? false} />
+        </TabsContent>
+
+        <TabsContent value="ai" className="h-full m-0 p-3 overflow-y-auto custom-scrollbar">
+          <AIAssistantPanel
+            technical={activeTechnical}
+            patterns={activePatterns}
+            volume={activeVolume}
+            news={activeNews}
+            sentiment={activeSentiment}
+            macro={activeMacro}
+            confluence={activeConfluence}
+            multiTimeframe={null}
+            currentPrice={currentQuote?.price}
+            priceChange={currentQuote?.changePercent}
+          />
+        </TabsContent>
+
+        <TabsContent value="tracker" className="h-full m-0 p-3 overflow-y-auto custom-scrollbar">
+          <AITradeTrackerPanel />
         </TabsContent>
       </div>
     </Tabs>
@@ -592,6 +629,29 @@ export default function TradeIQDashboard() {
         onDisconnect={disconnectBroker}
       />
       <AlertPanel watchlist={watchlist} brokerConnected={brokerConfig?.isActive ?? false} />
+    </div>
+  );
+
+  const mobileAIView = (
+    <div className="h-full overflow-y-auto custom-scrollbar p-3 mb-safe-nav">
+      <AIAssistantPanel
+        technical={activeTechnical}
+        patterns={activePatterns}
+        volume={activeVolume}
+        news={activeNews}
+        sentiment={activeSentiment}
+        macro={activeMacro}
+        confluence={activeConfluence}
+        multiTimeframe={null}
+        currentPrice={currentQuote?.price}
+        priceChange={currentQuote?.changePercent}
+      />
+    </div>
+  );
+
+  const mobileTrackerView = (
+    <div className="h-full overflow-y-auto custom-scrollbar p-3 mb-safe-nav">
+      <AITradeTrackerPanel />
     </div>
   );
 
@@ -794,6 +854,8 @@ export default function TradeIQDashboard() {
         <div className="flex-1 md:hidden overflow-hidden">
           {mobileTab === 'chart' && mobileChartView}
           {mobileTab === 'analysis' && mobileAnalysisView}
+          {mobileTab === 'tracker' && mobileTrackerView}
+          {mobileTab === 'ai' && mobileAIView}
           {mobileTab === 'portfolio' && mobilePortfolioView}
           {mobileTab === 'settings' && mobileSettingsView}
         </div>

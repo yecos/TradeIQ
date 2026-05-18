@@ -153,3 +153,30 @@ model AnalysisCache {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+// ─── AI Trade Tracker ────────────────────────────────────────────────────────
+// Records AI-generated trade recommendations and tracks their outcome.
+
+model AITradeRecord {
+  id              String    @id @default(cuid())
+  symbol          String
+  timeframe       String    // "1H", "4H", "1D", etc.
+  direction       String    // "LONG", "SHORT", "NEUTRAL"
+  entryPrice      Float
+  stopLoss        Float?
+  takeProfit      Float?
+  riskReward      Float?
+  confidence      String?   // "Alta", "Media", "Baja"
+  confluenceScore Int?
+  aiAnalysis      String    @default("") // Full AI analysis text
+  status          String    @default("PENDING") // PENDING, HIT_TP, HIT_SL, EXPIRED, MANUAL_CLOSE
+  actualExitPrice Float?
+  pnlPercent      Float?
+  maxFavorable    Float?    // MFE — max favorable excursion %
+  maxAdverse      Float?    // MAE — max adverse excursion %
+  expiresAt       DateTime? // When the trade recommendation expires
+  resolvedAt      DateTime?
+  notes           String    @default("")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
