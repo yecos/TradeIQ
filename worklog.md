@@ -121,3 +121,51 @@ Stage Summary:
 - Root cause: Alpaca IEX free tier only supports snapshots, not historical bars
 - Solution: Pre-fetch real quote price and anchor mock candles to it
 - All 399 tests pass, build succeeds
+
+---
+Task ID: 4
+Agent: Main
+Task: Fix chart to work like MetaTrader - real-time updates, OHLC overlay, price line, proper indicators
+
+Work Log:
+- Analyzed entire real-time data pipeline: use-realtime-candles.ts → alpaca-ws.ts → binance-ws.ts → trading-chart.tsx
+- Identified 6 critical bugs preventing MetaTrader-like behavior:
+  1. Alpaca WS only sent 1m bars, NOT trades for tick-by-tick updates
+  2. Volume aggregation used Math.max() for Alpaca (should be additive sum)
+  3. No current price line (MetaTrader shows horizontal line at current price)
+  4. No OHLC crosshair overlay (MetaTrader shows O/H/L/C under cursor)
+  5. WS updates not throttled (caused excessive re-renders)
+  6. Alpaca WS "connection limit exceeded" caused infinite reconnect loop
+- Fixed alpaca-ws.ts:
+  - Added trade subscription (bars + trades) for tick-by-tick close updates
+  - Added source field to AlpacaBarUpdate ('bar' | 'trade')
+  - Track currentBarClose/High/Low/Time for trade-based close updates
+  - Connection limit: retry 3 times with 15s delay, then fall back to polling
+  - Reset connectionLimitHits on successful auth
+  - Added 2s grace period on subscribe() after previous connection close
+- Fixed use-realtime-candles.ts:
+  - Complete rewrite with throttled state (200ms) for smooth rendering
+  - Added mergeLiveCandle with source parameter (bar vs trade)
+  - Trade updates only modify close/high/low (preserve open/volume)
+  - Alpaca volume: additive sum within timeframe bucket (not Math.max)
+  - Added currentPrice to hook result
+  - Added beforeunload handler for WS cleanup
+- Fixed trading-chart.tsx:
+  - Complete rewrite with MetaTrader-like styling (dark theme #0a0e17)
+  - OHLC overlay (O/H/L/C) at top-left, updates on crosshair move
+  - Current price line using lightweight-charts createPriceLine() API
+  - Status indicators: LIVE (green pulse), CONECTANDO (yellow pulse), DELAYED (blue)
+  - Dashed crosshair lines, rightOffset for price labels
+  - Better candlestick colors (green #22c55e / red #ef4444)
+- Fixed page.tsx:
+  - Track full WS state (not just isRealtime) via wsState
+  - Header badge shows LIVE/WS/DELAYED based on connection state
+  - Blue dot indicator for DELAYED mode
+- Verified in production: chart works, OHLC updates, prices change, DELAYED indicator shows
+  after Alpaca WS falls back to polling mode
+
+Stage Summary:
+- Chart now works like MetaTrader with OHLC overlay and price line
+- Alpaca WS gracefully falls back to polling after 3 connection limit errors
+- Prices update in real-time via WS (when connected) or polling (when DELAYED)
+- All 399 tests pass, build successful
