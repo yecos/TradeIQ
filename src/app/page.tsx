@@ -15,6 +15,7 @@ import { PortfolioPanel } from '@/components/trading/portfolio-panel';
 import { AlertPanel } from '@/components/trading/alert-panel';
 import { AIAssistantPanel } from '@/components/trading/ai-assistant-panel';
 import { AITradeTrackerPanel } from '@/components/trading/ai-trade-tracker-panel';
+import { DataProviderSetup } from '@/components/trading/data-provider-setup';
 import { MobileNav } from '@/components/trading/mobile-nav';
 import type { Candle, Quote, TechnicalAnalysis, PatternAnalysis, VolumeAnalysis, NewsAnalysis, SentimentAnalysis, MacroAnalysis, ConfluenceResult } from '@/lib/types';
 import type { WSConnectionState } from '@/lib/data/binance-ws';
@@ -334,7 +335,9 @@ export default function TradeIQDashboard() {
   const isLive = marketStatus?.isRealData && !marketStatus?.isFallback;
   const hasCoinGecko = marketStatus?.activeProviders?.includes('coingecko');
   const hasBinance = marketStatus?.activeProviders?.includes('binance');
+  const hasFinnhub = marketStatus?.activeProviders?.includes('finnhub');
   const hasPolygon = marketStatus?.activeProviders?.includes('polygon');
+  const hasAlpaca = !!(process.env.NEXT_PUBLIC_ALPACA_API_KEY && process.env.NEXT_PUBLIC_ALPACA_API_SECRET);
 
   // Shared right panel content (used in both desktop sidebar and mobile drawer)
   const rightPanelContent = (
@@ -447,6 +450,7 @@ export default function TradeIQDashboard() {
         </TabsContent>
 
         <TabsContent value="broker" className="h-full m-0 p-3 overflow-y-auto custom-scrollbar">
+          <DataProviderSetup onRefresh={() => window.location.reload()} />
           <BrokerPanel
             config={brokerConfig}
             onSave={saveBrokerConfig}
@@ -623,6 +627,7 @@ export default function TradeIQDashboard() {
 
   const mobileSettingsView = (
     <div className="h-full overflow-y-auto custom-scrollbar p-3 mb-safe-nav space-y-3">
+      <DataProviderSetup onRefresh={() => window.location.reload()} />
       <BrokerPanel
         config={brokerConfig}
         onSave={saveBrokerConfig}
@@ -665,13 +670,12 @@ export default function TradeIQDashboard() {
         <div className="bg-red-500/10 border-b border-red-500/30 px-3 py-1.5 flex items-center justify-center gap-2 flex-shrink-0">
           <AlertTriangle className="w-3.5 h-3.5 text-red-400 flex-shrink-0" />
           <span className="text-[10px] sm:text-xs text-red-300 font-medium">
-            DATOS SIMULADOS — No operar con dinero real basado en estos datos
+            DATOS SIMULADOS — Agrega FINNHUB_API_KEY en .env para datos reales de acciones/forex
           </span>
-          {marketStatus.dataQuality.warnings.length > 0 && (
-            <span className="text-[9px] text-red-400/70 hidden sm:inline">
-              ({marketStatus.dataQuality.warnings[0]})
-            </span>
-          )}
+          <a href="https://finnhub.io/register" target="_blank" rel="noopener noreferrer"
+            className="text-[9px] text-red-400 underline hover:text-red-300 hidden sm:inline">
+            Obtener clave gratuita
+          </a>
         </div>
       )}
       {!marketStatus?.dataQuality?.isMockData && marketStatus?.dataQuality?.isStale && (
@@ -778,9 +782,13 @@ export default function TradeIQDashboard() {
               {hasCoinGecko && <span className="text-[9px] font-medium text-emerald-400">CG</span>}
               {hasCoinGecko && hasBinance && <span className="text-[8px] text-gray-600">+</span>}
               {hasBinance && <span className="text-[9px] font-medium text-yellow-400">BIN</span>}
-              {(hasCoinGecko || hasBinance) && hasPolygon && <span className="text-[8px] text-gray-600">+</span>}
-              {hasPolygon && <span className="text-[9px] font-medium text-blue-400">POL</span>}
-              {!hasCoinGecko && !hasBinance && !hasPolygon && !isRealtimeWS && (
+              {(hasCoinGecko || hasBinance) && (hasFinnhub || hasPolygon) && <span className="text-[8px] text-gray-600">+</span>}
+              {hasFinnhub && <span className="text-[9px] font-medium text-cyan-400">FNH</span>}
+              {hasFinnhub && hasPolygon && <span className="text-[8px] text-gray-600">+</span>}
+              {hasPolygon && !hasFinnhub && <span className="text-[9px] font-medium text-blue-400">POL</span>}
+              {(hasFinnhub || hasPolygon) && hasAlpaca && <span className="text-[8px] text-gray-600">+</span>}
+              {hasAlpaca && <span className="text-[9px] font-medium text-purple-400">ALP</span>}
+              {!hasCoinGecko && !hasBinance && !hasFinnhub && !hasPolygon && !isRealtimeWS && (
                 <span className="text-[9px] font-medium text-yellow-500">MOCK</span>
               )}
               {marketStatus?.isFallback && <span className="text-[9px] text-red-400">FB</span>}

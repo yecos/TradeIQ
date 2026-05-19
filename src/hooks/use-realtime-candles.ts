@@ -1,26 +1,26 @@
 /**
  * useRealtimeCandles — React hook that merges REST historical candles
- * with Binance WebSocket live updates.
+ * with live WebSocket updates.
  *
  * How it works:
  * 1. Receives historical candles from the REST API (via TanStack Query)
- * 2. Subscribes to Binance WebSocket for the current symbol + timeframe
- * 3. On each WS message, updates the last candle (if forming) or appends a new one (if closed)
- * 4. Returns merged candles that update in real-time
+ * 2. For crypto: subscribes to Binance WebSocket
+ * 3. For stocks (if Alpaca keys configured): subscribes to Alpaca WebSocket
+ * 4. On each WS message, updates the last candle (if forming) or appends a new one (if closed)
+ * 5. Returns merged candles that update in real-time
  *
  * The hook also tracks WebSocket connection state and provides it
  * for UI indicators.
- *
- * IMPORTANT: Only works for crypto symbols. For stocks/ETFs,
- * the hook returns the original REST candles unchanged (no WS available).
  */
 
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
 import { getBinanceWS, isWSCompatible } from '@/lib/data/binance-ws';
+import { getAlpacaWS } from '@/lib/data/alpaca-ws';
 import type { Candle } from '@/lib/types';
 import type { WSConnectionState, WSState } from '@/lib/data/binance-ws';
+import type { AlpacaWSConnectionState } from '@/lib/data/alpaca-ws';
 
 interface UseRealtimeCandlesResult {
   /** Merged candles: historical + live updates */
@@ -31,6 +31,8 @@ interface UseRealtimeCandlesResult {
   isRealtime: boolean;
   /** Current latency in ms (from WS message timestamp) */
   latencyMs: number | null;
+  /** Which WS provider is active */
+  wsProvider: 'binance' | 'alpaca' | 'none';
 }
 
 /**
@@ -74,16 +76,37 @@ function mergeLiveCandle(historical: Candle[], liveCandle: Candle): Candle[] {
 }
 
 /**
- * Hook that provides real-time candle updates via Binance WebSocket.
+ * Check if Alpaca WS is available (keys configured in env).
+ */
+function isAlpacaAvailable(): boolean {
+  if (typeof window === 'undefined') return false;
+  return Boolean(
+    process.env.NEXT_PUBLIC_ALPACA_API_KEY && process.env.NEXT_PUBLIC_ALPACA_API_SECRET
+  );
+}
+
+/**
+ * Check if a symbol is a stock (not crypto) — for Alpaca WS routing.
+ */
+function isStockSymbol(symbol: string): boolean {
+  const upper = symbol.toUpperCase();
+  // Known crypto symbols
+  const knownCrypto = ['BTC', 'ETH', 'BNB', 'SOL', 'XRP', 'ADA', 'DOGE', 'DOT',
+    'AVAX', 'MATIC', 'LINK', 'UNI', 'ATOM', 'LTC', 'NEAR', 'AAVE', 'ARB', 'OP',
+    'APT', 'SUI', 'SHIB', 'PEPE', 'FIL', 'IMX', 'INJ', 'TIA', 'SEI', 'FET'];
+  const isCrypto = knownCrypto.includes(upper) || upper.endsWith('USDT') || upper.endsWith('BUSD');
+  return !isCrypto;
+}
+
+/**
+ * Hook that provides real-time candle updates via WebSocket.
  *
- * Design notes:
- * - All ref reads/writes happen inside useEffect callbacks (never during render)
- * - setState is only called from WS event callbacks (external system updates)
- *   or from useEffect with proper dependency arrays
- * - Historical candle changes are detected via a computed key in a useEffect
+ * Automatically selects the best WebSocket provider:
+ * - Crypto symbols → Binance WS (free, no key needed)
+ * - Stock/ETF symbols → Alpaca WS (free, requires API key)
  *
  * @param historicalCandles - Candles from the REST API (historical)
- * @param symbol - The trading symbol (e.g., 'BTC', 'ETHUSDT')
+ * @param symbol - The trading symbol (e.g., 'BTC', 'AAPL')
  * @param timeframe - The chart timeframe (e.g., '1m', '5m', '1D')
  * @returns Merged candles with real-time updates + WS state
  */
@@ -95,6 +118,7 @@ export function useRealtimeCandles(
   const [mergedCandles, setMergedCandles] = useState<Candle[]>(historicalCandles);
   const [wsState, setWsState] = useState<WSConnectionState>('disconnected');
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
+  const [wsProvider, setWsProvider] = useState<'binance' | 'alpaca' | 'none'>('none');
 
   // Refs for WS callback filtering — updated inside effects only
   const symbolRef = useRef(symbol);
@@ -107,7 +131,6 @@ export function useRealtimeCandles(
   });
 
   // Reset merged candles when historical data identity changes
-  // This happens when: new symbol, new timeframe, or REST API refetch
   const historyKey = `${symbol}:${timeframe}:${historicalCandles.length}:${historicalCandles[0]?.time ?? 0}:${historicalCandles[historicalCandles.length - 1]?.time ?? 0}`;
 
   useEffect(() => {
@@ -115,15 +138,15 @@ export function useRealtimeCandles(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [historyKey]);
 
-  // Subscribe to WebSocket for real-time updates
+  // ─── Binance WS for Crypto ───
   useEffect(() => {
     if (!isWSCompatible(symbol)) {
       return;
     }
 
+    // If Alpaca is also available but this is crypto, use Binance
     const ws = getBinanceWS();
 
-    // Subscribe to kline stream — setState from external callback is fine
     ws.subscribe(symbol, timeframe, (update) => {
       if (update.symbol !== symbolRef.current || update.interval !== timeframeRef.current) {
         return;
@@ -132,32 +155,83 @@ export function useRealtimeCandles(
       setMergedCandles(prev => mergeLiveCandle(prev, update.candle));
     });
 
-    // Track connection state — setState from external callback is fine
     const unsubState = ws.onStateChange((state: WSState) => {
       setWsState(state.connectionState);
       setLatencyMs(state.latencyMs);
+      setWsProvider('binance');
     });
 
     return () => {
       ws.unsubscribe();
       unsubState();
+      setWsProvider('none');
+    };
+  }, [symbol, timeframe]);
+
+  // ─── Alpaca WS for Stocks/ETFs ───
+  useEffect(() => {
+    // Only use Alpaca for non-crypto symbols
+    if (!isStockSymbol(symbol)) {
+      return;
+    }
+
+    // Check if Alpaca keys are available
+    if (!isAlpacaAvailable()) {
+      return;
+    }
+
+    const alpacaWS = getAlpacaWS();
+    if (!alpacaWS) {
+      return;
+    }
+
+    alpacaWS.subscribe(symbol, timeframe, (update) => {
+      if (update.symbol !== symbolRef.current) {
+        return;
+      }
+
+      setMergedCandles(prev => mergeLiveCandle(prev, update.candle));
+
+      // Update WS state from Alpaca
+      const alpacaState = alpacaWS.getState();
+      // Map Alpaca state to our WSConnectionState type
+      const mappedState: WSConnectionState = alpacaState === 'connected' ? 'connected' :
+        alpacaState === 'connecting' ? 'connecting' :
+        alpacaState === 'reconnecting' ? 'reconnecting' : 'disconnected';
+      setWsState(mappedState);
+      setWsProvider('alpaca');
+    });
+
+    // Track connection state
+    const alpacaState = alpacaWS.getState();
+    const mappedState: WSConnectionState = alpacaState === 'connected' ? 'connected' :
+      alpacaState === 'connecting' ? 'connecting' :
+      alpacaState === 'reconnecting' ? 'reconnecting' : 'disconnected';
+    setWsState(mappedState);
+
+    return () => {
+      alpacaWS.unsubscribe();
+      setWsProvider('none');
     };
   }, [symbol, timeframe]);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      const ws = getBinanceWS();
-      ws.unsubscribe();
+      if (isWSCompatible(symbol)) {
+        const ws = getBinanceWS();
+        ws.unsubscribe();
+      }
     };
-  }, []);
+  }, [symbol]);
 
-  const isRealtime = isWSCompatible(symbol) && wsState === 'connected';
+  const isRealtime = wsState === 'connected';
 
   return {
     candles: mergedCandles,
-    wsState: isWSCompatible(symbol) ? wsState : 'disconnected',
+    wsState,
     isRealtime,
     latencyMs,
+    wsProvider,
   };
 }
