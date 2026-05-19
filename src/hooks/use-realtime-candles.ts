@@ -9,32 +9,18 @@
  * 4. On each WS message, updates the last candle (if forming) or appends a new one (if closed)
  * 5. Returns merged candles that update in real-time
  *
- * FIX (BUG 3): Previously, when TanStack Query refetched historical candles,
- * the `historyKey` would change and `setMergedCandles(historicalCandles)` would
- * overwrite ALL WS-merged updates with stale REST data. This caused the chart
- * to "jump back" periodically, making candles appear frozen.
- *
- * Now we use a smarter merge strategy:
- * - When historical candles change for the SAME symbol/timeframe, we smart-merge
- *   them with the current WS state instead of replacing everything
- * - WS updates to the last candle (or new candles) are preserved
- * - Only if the symbol/timeframe changes do we fully reset
- *
- * FIX (BUG 4): Alpaca WS always sends 1-minute bars regardless of the
- * selected timeframe. When the user selects 5m/15m/1H/4H, we need to
- * aggregate the 1m bars into the correct timeframe before merging.
- * Without this, the WS candle timestamps don't match the chart's candle
- * timestamps, causing real-time updates to be silently dropped by
- * mergeLiveCandle() (which only updates if time matches or is newer).
- *
- * FIX (BUG 5): Added explicit initialization with historical candles
- * and a forced re-render trigger to ensure the chart always shows
- * candle data immediately, even if WS hasn't connected yet.
+ * MetaTrader-like behavior:
+ * - Binance WS sends kline updates every 1-2 seconds → smooth candle formation
+ * - Alpaca WS sends 1m bars + individual trades → trades update the last candle's
+ *   close in real-time between bar updates (tick-by-tick, like MetaTrader)
+ * - Throttled updates (250ms) prevent excessive re-renders while keeping the chart smooth
+ * - Volume aggregation: Binance sends cumulative volume (use max), Alpaca sends
+ *   per-bar volume (use additive sum within a timeframe bucket)
  */
 
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { getBinanceWS, isWSCompatible } from '@/lib/data/binance-ws';
 import { getAlpacaWS } from '@/lib/data/alpaca-ws';
 import type { Candle } from '@/lib/types';
@@ -52,41 +38,138 @@ interface UseRealtimeCandlesResult {
   latencyMs: number | null;
   /** Which WS provider is active */
   wsProvider: 'binance' | 'alpaca' | 'none';
+  /** Current price from the latest WS update */
+  currentPrice: number | null;
+}
+
+// ─── Throttle utility ────────────────────────────────────────────────────
+// Ensures we don't re-render more than ~4 times per second (250ms intervals).
+// This prevents excessive React re-renders from high-frequency WS messages
+// while keeping the chart smooth enough for real-time trading.
+
+function useThrottledState<T>(initialValue: T, intervalMs: number = 250): [T, React.Dispatch<React.SetStateAction<T>>] {
+  const [value, setValue] = useState<T>(initialValue);
+  const pendingRef = useRef<T | null>(null);
+  const lastFlushRef = useRef<number>(0);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flush = useCallback(() => {
+    if (pendingRef.current !== null) {
+      setValue(pendingRef.current);
+      pendingRef.current = null;
+    }
+    lastFlushRef.current = Date.now();
+    timerRef.current = null;
+  }, []);
+
+  const throttledSetValue = useCallback((action: React.SetStateAction<T>) => {
+    const now = Date.now();
+    const elapsed = now - lastFlushRef.current;
+
+    if (action instanceof Function) {
+      // For function updaters, we need the current value
+      // We apply the updater to the pending value if one exists, otherwise to current
+      if (pendingRef.current !== null) {
+        pendingRef.current = action(pendingRef.current);
+      } else {
+        // Need to compute the new value
+        pendingRef.current = action(value);
+      }
+    } else {
+      pendingRef.current = action;
+    }
+
+    if (elapsed >= intervalMs) {
+      // Enough time has passed — flush immediately
+      flush();
+    } else if (!timerRef.current) {
+      // Schedule a flush for the remaining time
+      timerRef.current = setTimeout(flush, intervalMs - elapsed);
+    }
+  }, [value, intervalMs, flush]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  return [value, throttledSetValue];
 }
 
 /**
  * Merge a live candle update into the existing candle array.
+ *
+ * For Alpaca trade updates (source='trade'):
+ * - open and volume are 0 — don't overwrite existing open/volume
+ * - Only update close, high, low from the trade price
+ *
+ * For Binance and Alpaca bar updates (source='bar'):
+ * - Full OHLCV update
+ * - Volume: use Math.max for Binance (cumulative), additive for Alpaca (per-bar)
  */
-function mergeLiveCandle(historical: Candle[], liveCandle: Candle): Candle[] {
+function mergeLiveCandle(
+  historical: Candle[],
+  liveCandle: Candle,
+  source: 'bar' | 'trade' = 'bar',
+  wsProvider: 'binance' | 'alpaca' = 'binance'
+): Candle[] {
   if (historical.length === 0) {
+    if (source === 'trade') {
+      // Trade updates without any existing candles — can't create a candle from just a trade
+      return historical;
+    }
     return [liveCandle];
   }
 
   const lastCandle = historical[historical.length - 1];
 
   // Same period — update the last candle
-  // FIX: When aggregating 1m bars into larger timeframes, we must
-  // preserve the open from the first bar in the bucket and properly
-  // merge high/low. The close always comes from the latest bar.
-  // For volume: Binance WS sends cumulative volume per kline period,
-  // while Alpaca sends per-bar volume. We use the liveCandle's volume
-  // when it's larger (Binance cumulative), otherwise add (Alpaca per-bar).
   if (lastCandle.time === liveCandle.time) {
     const merged = [...historical];
-    merged[merged.length - 1] = {
-      time: liveCandle.time,
-      open: lastCandle.open,    // Keep the original open (first bar in bucket)
-      high: Math.max(lastCandle.high, liveCandle.high),
-      low: Math.min(lastCandle.low, liveCandle.low),
-      close: liveCandle.close,  // Always use latest close
-      // Use the larger volume — handles both Binance (cumulative) and Alpaca (per-bar)
-      volume: Math.max(lastCandle.volume, liveCandle.volume),
-    };
+
+    if (source === 'trade') {
+      // Trade update: only update close, high, low — preserve open and volume
+      merged[merged.length - 1] = {
+        time: liveCandle.time,
+        open: lastCandle.open,    // Preserve the bar's open
+        high: Math.max(lastCandle.high, liveCandle.high),
+        low: Math.min(lastCandle.low, liveCandle.low),
+        close: liveCandle.close,  // Update close to trade price
+        volume: lastCandle.volume, // Preserve the bar's volume
+      };
+    } else {
+      // Bar update: full OHLCV merge
+      const newVolume = wsProvider === 'alpaca'
+        ? lastCandle.volume + liveCandle.volume  // Alpaca: additive (per-bar volume)
+        : Math.max(lastCandle.volume, liveCandle.volume); // Binance: cumulative
+
+      merged[merged.length - 1] = {
+        time: liveCandle.time,
+        open: lastCandle.open,    // Keep the original open (first bar in bucket)
+        high: Math.max(lastCandle.high, liveCandle.high),
+        low: Math.min(lastCandle.low, liveCandle.low),
+        close: liveCandle.close,  // Always use latest close
+        volume: newVolume,
+      };
+    }
     return merged;
   }
 
   // New period — append
   if (liveCandle.time > lastCandle.time) {
+    if (source === 'trade') {
+      // Trade for a new period we don't have yet — create a minimal candle
+      return [...historical, {
+        time: liveCandle.time,
+        open: liveCandle.close, // We don't know the real open, use close as approximation
+        high: liveCandle.high,
+        low: liveCandle.low,
+        close: liveCandle.close,
+        volume: 0,
+      }];
+    }
     return [...historical, liveCandle];
   }
 
@@ -115,7 +198,6 @@ function smartMergeHistorical(
   const histLast = newHistorical[newHistorical.length - 1];
 
   // WS has updated this candle (same time, but WS has fresher data)
-  // Prefer WS version — it's always more recent than the REST snapshot
   if (mergedLast.time === histLast.time) {
     const merged = [...newHistorical];
     merged[merged.length - 1] = {
@@ -124,7 +206,7 @@ function smartMergeHistorical(
       high: Math.max(histLast.high, mergedLast.high),
       low: Math.min(histLast.low, mergedLast.low),
       close: mergedLast.close,
-      volume: mergedLast.volume,
+      volume: Math.max(histLast.volume, mergedLast.volume),
     };
     return merged;
   }
@@ -144,12 +226,8 @@ function smartMergeHistorical(
  * Alpaca WS always sends 1m bars. When the chart shows 5m/15m/1H/4H/1D candles,
  * we need to snap the 1m bar timestamp to the start of its containing bucket,
  * so that mergeLiveCandle() can correctly update the right candle in the array.
- *
- * For example, a 1m bar at 10:23 with timeframe=5m gets snapped to 10:20,
- * which matches the 5m candle already in the chart data.
  */
 function aggregateAlpacaBar(candle: Candle, timeframe: string): Candle {
-  // If timeframe is 1m or not recognized, no aggregation needed
   if (timeframe === '1m' || !timeframe) return candle;
 
   const tfSeconds: Record<string, number> = {
@@ -164,7 +242,6 @@ function aggregateAlpacaBar(candle: Candle, timeframe: string): Candle {
   const bucketSeconds = tfSeconds[timeframe];
   if (!bucketSeconds) return candle;
 
-  // Snap the candle time to the start of its bucket
   const bucketStart = Math.floor(candle.time / bucketSeconds) * bucketSeconds;
 
   return {
@@ -201,20 +278,24 @@ function isStockSymbol(symbol: string): boolean {
 
 /**
  * Hook that provides real-time candle updates via WebSocket.
+ * Designed to work like MetaTrader: tick-by-tick price updates, smooth candle formation.
  */
 export function useRealtimeCandles(
   historicalCandles: Candle[],
   symbol: string,
   timeframe: string
 ): UseRealtimeCandlesResult {
-  const [mergedCandles, setMergedCandles] = useState<Candle[]>(historicalCandles);
+  // Use throttled state for merged candles to prevent excessive re-renders
+  const [mergedCandles, setMergedCandles] = useThrottledState<Candle[]>(historicalCandles, 200);
   const [wsState, setWsState] = useState<WSConnectionState>('disconnected');
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
   const [wsProvider, setWsProvider] = useState<'binance' | 'alpaca' | 'none'>('none');
+  const [currentPrice, setCurrentPrice] = useState<number | null>(null);
 
   // Refs for WS callback filtering
   const symbolRef = useRef(symbol);
   const timeframeRef = useRef(timeframe);
+  const wsProviderRef = useRef<'binance' | 'alpaca' | 'none'>('none');
 
   // Track symbol:timeframe for reset detection
   const prevKeyRef = useRef(`${symbol}:${timeframe}`);
@@ -225,9 +306,7 @@ export function useRealtimeCandles(
     timeframeRef.current = timeframe;
   });
 
-  // FIX (BUG 3): Smart merge when historical candles update.
-  // When symbol/timeframe changes → full reset.
-  // When same symbol/timeframe (REST refetch) → smart merge preserving WS updates.
+  // Smart merge when historical candles update
   const currentKey = `${symbol}:${timeframe}`;
 
   useEffect(() => {
@@ -237,6 +316,7 @@ export function useRealtimeCandles(
     if (prevKey !== currentKey) {
       // Symbol or timeframe changed — full reset
       setMergedCandles(historicalCandles);
+      setCurrentPrice(null);
     } else {
       // Same symbol/timeframe — smart merge to preserve WS updates
       setMergedCandles(prev => smartMergeHistorical(historicalCandles, prev));
@@ -250,35 +330,37 @@ export function useRealtimeCandles(
     }
 
     const ws = getBinanceWS();
+    wsProviderRef.current = 'binance';
 
     ws.subscribe(symbol, timeframe, (update) => {
       if (update.symbol !== symbolRef.current || update.interval !== timeframeRef.current) {
         return;
       }
 
-      setMergedCandles(prev => mergeLiveCandle(prev, update.candle));
+      setMergedCandles(prev => mergeLiveCandle(prev, update.candle, 'bar', 'binance'));
+      setCurrentPrice(update.candle.close);
     });
 
     const unsubState = ws.onStateChange((state: WSState) => {
       setWsState(state.connectionState);
       setLatencyMs(state.latencyMs);
       setWsProvider('binance');
+      wsProviderRef.current = 'binance';
     });
 
     return () => {
       ws.unsubscribe();
       unsubState();
       setWsProvider('none');
+      wsProviderRef.current = 'none';
     };
   }, [symbol, timeframe]);
 
   // ─── Alpaca WS for Stocks/ETFs ───
   //
-  // FIX (BUG 4): Alpaca WS always sends 1-minute bars. When the user
-  // selects a larger timeframe (5m, 15m, 1H, 4H, 1D), we must aggregate
-  // the incoming 1m bars into the correct timeframe bucket before merging.
-  // Without this, the WS candle time never matches the chart candle time,
-  // so mergeLiveCandle() either ignores the update or appends a duplicate.
+  // Alpaca WS sends 1m bars AND individual trades.
+  // - Bars: full OHLCV update every minute
+  // - Trades: tick-by-tick close price updates between bars (MetaTrader-like)
   useEffect(() => {
     if (!isStockSymbol(symbol)) {
       return;
@@ -293,15 +375,27 @@ export function useRealtimeCandles(
       return;
     }
 
+    wsProviderRef.current = 'alpaca';
+
     alpacaWS.subscribe(symbol, timeframe, (update) => {
       if (update.symbol !== symbolRef.current) {
         return;
       }
 
-      // Aggregate 1m bar into the selected timeframe
-      const aggregatedCandle = aggregateAlpacaBar(update.candle, timeframeRef.current);
+      if (update.source === 'trade') {
+        // Trade update: tick-by-tick price change
+        // Aggregate the 1m bar time to the current timeframe bucket
+        const aggregatedCandle = aggregateAlpacaBar(update.candle, timeframeRef.current);
 
-      setMergedCandles(prev => mergeLiveCandle(prev, aggregatedCandle));
+        setMergedCandles(prev => mergeLiveCandle(prev, aggregatedCandle, 'trade', 'alpaca'));
+        setCurrentPrice(update.candle.close);
+      } else {
+        // Bar update: full 1m bar with OHLCV
+        const aggregatedCandle = aggregateAlpacaBar(update.candle, timeframeRef.current);
+
+        setMergedCandles(prev => mergeLiveCandle(prev, aggregatedCandle, 'bar', 'alpaca'));
+        setCurrentPrice(update.candle.close);
+      }
     });
 
     const unsubState = alpacaWS.onStateChange((state: AlpacaWSState) => {
@@ -314,6 +408,7 @@ export function useRealtimeCandles(
 
       if (state.connectionState === 'connected' || state.connectionState === 'connecting' || state.connectionState === 'reconnecting') {
         setWsProvider('alpaca');
+        wsProviderRef.current = 'alpaca';
       }
     });
 
@@ -321,13 +416,11 @@ export function useRealtimeCandles(
       alpacaWS.unsubscribe();
       unsubState();
       setWsProvider('none');
+      wsProviderRef.current = 'none';
     };
   }, [symbol, timeframe]);
 
-  // FIX (BUG 5): Ensure mergedCandles is always initialized from historical
-  // data. Previously, if the hook mounted with empty candles and they were
-  // populated later, the initial state [] could persist until a WS message
-  // arrived. This forced update ensures the chart always has data.
+  // Ensure mergedCandles is always initialized from historical data
   useEffect(() => {
     if (historicalCandles.length > 0 && mergedCandles.length === 0) {
       setMergedCandles(historicalCandles);
@@ -356,5 +449,6 @@ export function useRealtimeCandles(
     isRealtime,
     latencyMs,
     wsProvider,
+    currentPrice,
   };
 }

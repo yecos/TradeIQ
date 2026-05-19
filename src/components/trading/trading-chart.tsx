@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useMemo, useState } from 'react';
+import { useEffect, useRef, useMemo, useState, useCallback } from 'react';
 import { createChart, ColorType, CandlestickSeries, HistogramSeries } from 'lightweight-charts';
 import type { Time, IChartApi, ISeriesApi } from 'lightweight-charts';
 import type { Candle } from '@/lib/types';
@@ -29,6 +29,7 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
     wsState,
     isRealtime,
     latencyMs,
+    currentPrice,
   } = useRealtimeCandles(candles, symbol, timeframe);
 
   // Report WS state to parent
@@ -36,17 +37,16 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
     onWSStateChange?.(wsState, isRealtime, latencyMs);
   }, [wsState, isRealtime, latencyMs, onWSStateChange]);
 
-  // Timezone display label (computed once, not reactive)
+  // Timezone display label
   const [tzDisplay] = useState(() => getTimezoneDisplay());
 
-  // Memoize chart data transformation.
-  // CRITICAL FIX: Do NOT convert UTC timestamps to local time via utcToLocal().
-  // Previously, utcToLocal() shifted timestamps by the timezone offset, which caused:
-  // 1. Timestamps no longer aligned with interval boundaries → lightweight-charts shows gaps
-  // 2. WS updates (boundary-aligned UTC) didn't match chart data (shifted) → candles "jump"
-  // 3. Duplicate timestamps when multiple UTC times map to the same local time
-  // lightweight-charts v5 correctly handles UTC timestamps and displays them
-  // using the browser's locale settings automatically.
+  // OHLC data under crosshair (for overlay display like MetaTrader)
+  const [crosshairData, setCrosshairData] = useState<{
+    open: number; high: number; low: number; close: number;
+    volume: number; time: string; change: number;
+  } | null>(null);
+
+  // Memoize chart data transformation
   const chartData = useMemo(() => {
     const data = realtimeCandles;
     if (!data.length) return { candles: [], volume: [] };
@@ -62,17 +62,70 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
     const volumeMapped = data.map(c => ({
       time: c.time as Time,
       value: c.volume,
-      color: c.close >= c.open ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+      color: c.close >= c.open ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
     }));
 
     return { candles: candlesMapped, volume: volumeMapped };
   }, [realtimeCandles]);
 
+  // Get the last close for the current price line
+  const lastClose = useMemo(() => {
+    if (currentPrice !== null) return currentPrice;
+    if (chartData.candles.length === 0) return null;
+    return chartData.candles[chartData.candles.length - 1].close;
+  }, [currentPrice, chartData.candles]);
+
+  // Format price for display
+  const formatPrice = useCallback((price: number): string => {
+    if (price >= 1000) return price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    if (price >= 1) return price.toFixed(2);
+    return price.toFixed(4);
+  }, []);
+
   // ─── Incremental Update Logic ─────────────────────────────────────────
-  // Instead of calling setData() on every WS message (expensive for large
-  // datasets), we use update() for the last candle which is much faster.
   const lastCandleTimeRef = useRef<number | null>(null);
   const lastCandleCountRef = useRef<number>(0);
+
+  // Crosshair move handler
+  const handleCrosshairMove = useCallback((param: any) => {
+    if (!param || !param.time || !param.seriesData) {
+      // Crosshair left the chart — show last candle data
+      if (chartData.candles.length > 0) {
+        const last = chartData.candles[chartData.candles.length - 1];
+        const prevClose = chartData.candles.length > 1
+          ? chartData.candles[chartData.candles.length - 2].close
+          : last.open;
+        const change = last.close - prevClose;
+        setCrosshairData({
+          open: last.open,
+          high: last.high,
+          low: last.low,
+          close: last.close,
+          volume: chartData.volume[chartData.volume.length - 1]?.value ?? 0,
+          time: new Date((last.time as number) * 1000).toLocaleTimeString(),
+          change,
+        });
+      }
+      return;
+    }
+
+    const candleData = param.seriesData.get(candlestickSeriesRef.current);
+    const volumeData = param.seriesData.get(volumeSeriesRef.current);
+
+    if (candleData) {
+      const cd = candleData as any;
+      const prevClose = cd.open; // Approximate — the change from open
+      setCrosshairData({
+        open: cd.open,
+        high: cd.high,
+        low: cd.low,
+        close: cd.close,
+        volume: (volumeData as any)?.value ?? 0,
+        time: new Date((param.time as number) * 1000).toLocaleTimeString(),
+        change: cd.close - cd.open,
+      });
+    }
+  }, [chartData.candles, chartData.volume]);
 
   // Create chart once on mount
   useEffect(() => {
@@ -82,39 +135,52 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
 
     const chart = createChart(container, {
       layout: {
-        background: { type: ColorType.Solid, color: '#0a0a0f' },
-        textColor: '#9ca3af',
+        background: { type: ColorType.Solid, color: '#0a0e17' },
+        textColor: '#6b7280',
         fontSize: 11,
       },
       grid: {
-        vertLines: { color: 'rgba(255, 255, 255, 0.03)' },
-        horzLines: { color: 'rgba(255, 255, 255, 0.03)' },
+        vertLines: { color: 'rgba(255, 255, 255, 0.02)' },
+        horzLines: { color: 'rgba(255, 255, 255, 0.02)' },
       },
       crosshair: {
-        mode: 0,
-        vertLine: { color: 'rgba(255, 255, 255, 0.1)', labelBackgroundColor: '#1a1a2e' },
-        horzLine: { color: 'rgba(255, 255, 255, 0.1)', labelBackgroundColor: '#1a1a2e' },
+        mode: 0, // Normal mode (crosshair moves freely)
+        vertLine: {
+          color: 'rgba(255, 255, 255, 0.08)',
+          labelBackgroundColor: '#1e293b',
+          width: 1,
+          style: 2, // Dashed
+        },
+        horzLine: {
+          color: 'rgba(255, 255, 255, 0.08)',
+          labelBackgroundColor: '#1e293b',
+          width: 1,
+          style: 2,
+        },
       },
       rightPriceScale: {
-        borderColor: 'rgba(255, 255, 255, 0.06)',
+        borderColor: 'rgba(255, 255, 255, 0.04)',
         scaleMargins: { top: 0.1, bottom: 0.2 },
       },
       timeScale: {
-        borderColor: 'rgba(255, 255, 255, 0.06)',
+        borderColor: 'rgba(255, 255, 255, 0.04)',
         timeVisible: true,
         secondsVisible: false,
+        rightOffset: 5, // Leave space on the right for the price line label
+        barSpacing: 8,
+        minBarSpacing: 2,
       },
       width: container.clientWidth,
       height: container.clientHeight,
     });
 
-    // Add candlestick series
+    // Add candlestick series with MetaTrader-like styling
     const candlestickSeries = chart.addSeries(CandlestickSeries, {
-      upColor: '#10b981',
+      upColor: '#22c55e',
       downColor: '#ef4444',
-      borderUpColor: '#10b981',
+      borderUpColor: '#22c55e',
       borderDownColor: '#ef4444',
-      wickUpColor: '#10b981',
+      wickUpColor: '#22c55e',
       wickDownColor: '#ef4444',
     });
 
@@ -127,6 +193,9 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
     chart.priceScale('volume').applyOptions({
       scaleMargins: { top: 0.85, bottom: 0 },
     });
+
+    // Subscribe to crosshair move for OHLC overlay
+    chart.subscribeCrosshairMove(handleCrosshairMove);
 
     chartRef.current = chart;
     candlestickSeriesRef.current = candlestickSeries;
@@ -146,13 +215,14 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
     resizeObserver.observe(container);
 
     return () => {
+      chart.unsubscribeCrosshairMove(handleCrosshairMove);
       resizeObserver.disconnect();
       chart.remove();
       chartRef.current = null;
       candlestickSeriesRef.current = null;
       volumeSeriesRef.current = null;
     };
-  }, []);
+  }, [handleCrosshairMove]);
 
   // Update data — uses incremental updates for real-time, full setData for symbol changes
   useEffect(() => {
@@ -176,11 +246,8 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
       prevCandleCountRef.current = candleCount;
     } else if (isRealtime && candleCount >= prevCount) {
       // Real-time update — use incremental update for performance
-      // Only update the last candle (much faster than setData for 1000+ candles)
-
       if (candleCount > prevCount) {
-        // New candle added — need to update both the last old candle (now closed)
-        // and add the new candle
+        // New candle added — update the series
         candlestickSeriesRef.current.setData(chartData.candles);
         volumeSeriesRef.current.setData(chartData.volume);
       } else if (candleCount === prevCount && lastCandleTimeRef.current !== null) {
@@ -191,12 +258,11 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
           volumeSeriesRef.current.update(lastVolume);
         } catch {
           // update() can fail if the time doesn't match any existing bar
-          // Fall back to setData
           candlestickSeriesRef.current.setData(chartData.candles);
           volumeSeriesRef.current.setData(chartData.volume);
         }
       } else {
-        // Fewer candles than before (shouldn't happen normally) — full reload
+        // Fewer candles than before — full reload
         candlestickSeriesRef.current.setData(chartData.candles);
         volumeSeriesRef.current.setData(chartData.volume);
       }
@@ -217,9 +283,6 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
       candlestickSeriesRef.current.setData(chartData.candles);
       volumeSeriesRef.current.setData(chartData.volume);
 
-      // FIX: Always fit content on first load to ensure candles are visible.
-      // Previously only fitted if prevCandleCountRef was 0, but this ref
-      // could be stale after symbol changes or initial render timing issues.
       if (prevCandleCountRef.current === 0 || candleCount !== prevCandleCountRef.current) {
         chartRef.current?.timeScale().fitContent();
       }
@@ -236,14 +299,61 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
 
       {/* Loading overlay */}
       {realtimeCandles.length === 0 && (
-        <div className="absolute inset-0 flex items-center justify-center bg-[#0a0a0f]/80">
+        <div className="absolute inset-0 flex items-center justify-center bg-[#0a0e17]/80">
           <div className="text-gray-500 text-sm">Cargando datos del gráfico...</div>
+        </div>
+      )}
+
+      {/* ─── OHLC Overlay (MetaTrader-style) ──────────────────────────────── */}
+      {crosshairData && (
+        <div className="absolute top-1 left-1 flex items-center gap-2 z-10 pointer-events-none select-none">
+          <span className="text-[10px] font-mono text-gray-400">
+            O <span className="text-gray-200">{formatPrice(crosshairData.open)}</span>
+          </span>
+          <span className="text-[10px] font-mono text-gray-400">
+            H <span className="text-gray-200">{formatPrice(crosshairData.high)}</span>
+          </span>
+          <span className="text-[10px] font-mono text-gray-400">
+            L <span className="text-gray-200">{formatPrice(crosshairData.low)}</span>
+          </span>
+          <span className="text-[10px] font-mono text-gray-400">
+            C <span className={crosshairData.change >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+              {formatPrice(crosshairData.close)}
+            </span>
+          </span>
+          {crosshairData.volume > 0 && (
+            <span className="text-[10px] font-mono text-gray-500">
+              Vol <span className="text-gray-300">{crosshairData.volume >= 1000000
+                ? `${(crosshairData.volume / 1000000).toFixed(1)}M`
+                : crosshairData.volume >= 1000
+                ? `${(crosshairData.volume / 1000).toFixed(1)}K`
+                : crosshairData.volume.toFixed(0)}</span>
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* ─── Current Price Line (MetaTrader-style) ───────────────────────── */}
+      {lastClose !== null && (
+        <div
+          className="absolute right-0 z-10 pointer-events-none select-none"
+          style={{
+            // Position at the right edge, aligned with the price scale
+            top: '50%', // Approximate — lightweight-charts manages the exact position
+          }}
+        >
+          <div className={`px-1.5 py-0.5 text-[9px] font-mono font-bold whitespace-nowrap ${
+            crosshairData && crosshairData.change >= 0 ? 'bg-emerald-600 text-white' : 'bg-red-600 text-white'
+          }`}
+          style={{ borderRadius: '2px 0 0 2px' }}>
+            ${formatPrice(lastClose)}
+          </div>
         </div>
       )}
 
       {/* Real-time indicator */}
       {isRealtime && (
-        <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/40 backdrop-blur-sm rounded px-2 py-0.5 z-10">
+        <div className="absolute top-1 right-12 flex items-center gap-1.5 bg-black/40 backdrop-blur-sm rounded px-2 py-0.5 z-10">
           <span className="relative flex h-2 w-2">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
             <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
@@ -257,7 +367,7 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
 
       {/* Connecting indicator */}
       {wsState === 'connecting' || wsState === 'reconnecting' ? (
-        <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/40 backdrop-blur-sm rounded px-2 py-0.5 z-10">
+        <div className="absolute top-1 right-12 flex items-center gap-1.5 bg-black/40 backdrop-blur-sm rounded px-2 py-0.5 z-10">
           <span className="relative flex h-2 w-2">
             <span className="animate-pulse absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75"></span>
             <span className="relative inline-flex rounded-full h-2 w-2 bg-yellow-500"></span>
@@ -267,7 +377,7 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
       ) : null}
 
       {/* Timezone indicator */}
-      <div className="absolute bottom-2 right-2 bg-black/40 backdrop-blur-sm rounded px-1.5 py-0.5 z-10">
+      <div className="absolute bottom-1 right-1 bg-black/40 backdrop-blur-sm rounded px-1.5 py-0.5 z-10">
         <span className="text-[8px] text-gray-500 font-mono">{tzDisplay}</span>
       </div>
     </div>

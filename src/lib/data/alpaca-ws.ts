@@ -24,6 +24,8 @@ export interface AlpacaBarUpdate {
   symbol: string;
   timeframe: string;
   candle: Candle;
+  /** Whether this update comes from a bar (1m candle) or a trade (tick) */
+  source: 'bar' | 'trade';
 }
 
 export type AlpacaBarCallback = (update: AlpacaBarUpdate) => void;
@@ -94,6 +96,11 @@ export class AlpacaWebSocket {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private lastMessageTime: number | null = null;
   private disposed = false;
+  // Track the current forming bar for trade-based close updates
+  private currentBarClose: number | null = null;
+  private currentBarHigh: number | null = null;
+  private currentBarLow: number | null = null;
+  private currentBarTime: number | null = null;
 
   constructor(apiKey: string, apiSecret: string, isPaper: boolean = true) {
     this.apiKey = apiKey;
@@ -243,17 +250,16 @@ export class AlpacaWebSocket {
       this.setConnectionState('connected');
       this.reconnectAttempts = 0;
 
-      // Subscribe to bars for the current symbol
-      // Alpaca WS expects bar subscriptions as an array of symbol strings,
-      // NOT objects with symbol+timeframe. The timeframe is set by the
-      // bar type (1Min, 5Min, etc.) which Alpaca auto-selects based on the
-      // data feed. For IEX free tier, 1Min bars are the default.
+      // Subscribe to both bars AND trades for the current symbol.
+      // Bars give us OHLCV every minute, trades give us tick-by-tick price
+      // updates between bars — this is what makes the chart feel like MetaTrader.
       if (this.currentSymbol) {
         this.ws?.send(JSON.stringify({
           action: 'subscribe',
           bars: [this.currentSymbol],
+          trades: [this.currentSymbol],
         }));
-        console.log(`[TradeIQ AlpacaWS] Subscribed to bars for ${this.currentSymbol}`);
+        console.log(`[TradeIQ AlpacaWS] Subscribed to bars+trades for ${this.currentSymbol}`);
       }
       return;
     }
@@ -292,21 +298,49 @@ export class AlpacaWebSocket {
           volume: barMsg.v,
         };
 
+        // Track the forming bar for trade-based close updates
+        this.currentBarTime = candle.time;
+        this.currentBarClose = candle.close;
+        this.currentBarHigh = candle.high;
+        this.currentBarLow = candle.low;
+
         this.barCallback({
           symbol: this.currentSymbol,
           timeframe: this.currentTimeframe || '1m',
           candle,
+          source: 'bar',
         });
       }
     }
 
-    // Handle trade updates — use for real-time price between bar updates
-    // This provides faster feedback than waiting for the next bar
+    // Handle trade updates — use for tick-by-tick price updates between bar updates.
+    // This is what makes the chart feel like MetaTrader: instead of waiting for
+    // the next 1m bar, we update the close price on every trade.
     if (msg.T === 't' && this.barCallback && this.currentSymbol) {
       const tradeMsg = msg as unknown as AlpacaWSTradeMessage;
-      if (tradeMsg.S === this.currentSymbol && this.lastMessageTime) {
-        // Update last message time for latency tracking
+      if (tradeMsg.S === this.currentSymbol && this.currentBarTime !== null) {
         this.lastMessageTime = Date.now();
+
+        const tradePrice = tradeMsg.p;
+        // Update the current forming bar with the latest trade price
+        // Keep the bar's open, but update close/high/low based on the trade
+        this.currentBarClose = tradePrice;
+        this.currentBarHigh = Math.max(this.currentBarHigh ?? tradePrice, tradePrice);
+        this.currentBarLow = Math.min(this.currentBarLow ?? tradePrice, tradePrice);
+
+        this.barCallback({
+          symbol: this.currentSymbol,
+          timeframe: this.currentTimeframe || '1m',
+          candle: {
+            time: this.currentBarTime,
+            open: 0, // Signal that this is a trade update — don't change open
+            high: this.currentBarHigh,
+            low: this.currentBarLow,
+            close: this.currentBarClose,
+            volume: 0, // Trade updates don't carry volume
+          },
+          source: 'trade',
+        });
       }
     }
 
