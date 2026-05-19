@@ -122,7 +122,7 @@ export class AlpacaProvider implements MarketDataProvider {
       `&start=${start.toISOString()}` +
       `&end=${now.toISOString()}` +
       `&limit=${candleLimit}` +
-      `&adjustment=raw`;
+      `&adjustment=split`;
 
     const data = await this.fetchFromAlpaca<AlpacaBarsResponse>(url);
 

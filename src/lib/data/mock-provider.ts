@@ -8,10 +8,18 @@ import type { MarketDataProvider, SymbolInfo } from './market-data-interface';
 export class MockProvider implements MarketDataProvider {
   readonly name = 'mock';
 
+  /** Last known real quote prices — used to anchor mock candles to realistic levels */
+  private lastKnownPrices: Map<string, number> = new Map();
+
+  /** Update the last known real price for a symbol (called by SmartProvider when real quotes succeed) */
+  setLastKnownPrice(symbol: string, price: number): void {
+    this.lastKnownPrices.set(symbol.toUpperCase(), price);
+  }
+
   static readonly SYMBOL_SEEDS: Record<string, { base: number; vol: number; trend: number; name: string; type?: string }> = {
     // Stocks
     'AAPL': { base: 195, vol: 3.5, trend: 0.08, name: 'Apple Inc.' },
-    'NVDA': { base: 880, vol: 18, trend: 0.15, name: 'NVIDIA Corporation' },
+    'NVDA': { base: 130, vol: 5, trend: 0.15, name: 'NVIDIA Corporation' },
     'MSFT': { base: 420, vol: 5, trend: 0.06, name: 'Microsoft Corporation' },
     'GOOGL': { base: 175, vol: 3, trend: 0.07, name: 'Alphabet Inc.' },
     'AMZN': { base: 185, vol: 4, trend: 0.09, name: 'Amazon.com Inc.' },
@@ -34,7 +42,9 @@ export class MockProvider implements MarketDataProvider {
   };
 
   async getCandles(symbol: string, days: number = 180, interval: string = '1D'): Promise<Candle[]> {
-    return generateRealisticCandles(symbol, days, interval);
+    // Use last known real price as base if available, otherwise use seed
+    const lastPrice = this.lastKnownPrices.get(symbol.toUpperCase());
+    return generateRealisticCandles(symbol, days, interval, lastPrice);
   }
 
   async getQuote(symbol: string): Promise<Quote> {
@@ -99,11 +109,13 @@ function intervalToSeconds(interval: string): number {
  * The `days` parameter determines the total lookback period, and the interval
  * determines how many candles fit in that period.
  */
-function generateRealisticCandles(symbol: string, days: number = 180, interval: string = '1D'): Candle[] {
+function generateRealisticCandles(symbol: string, days: number = 180, interval: string = '1D', realBasePrice?: number): Candle[] {
   const seeds = MockProvider.SYMBOL_SEEDS;
   const seed = seeds[symbol] || { base: 100 + Math.random() * 200, vol: 5, trend: 0.05, name: symbol };
   const candles: Candle[] = [];
-  let price = seed.base;
+  // Use real price as base if available — ensures mock candles match real quote levels
+  // This prevents the jarring mismatch where quotes show $222 but candles show $880
+  let price = realBasePrice ?? seed.base;
   const intervalSeconds = intervalToSeconds(interval);
   const daySeconds = 86400;
 

@@ -142,6 +142,8 @@ export class SmartProvider implements MarketDataProvider {
         );
         if (result) {
           this.mockSymbols.delete(symbol);
+          // Anchor mock candle prices to real quote — ensures consistency if candles fall back to mock
+          this.mock.setLastKnownPrice(symbol, result.price);
           return this.validateAndMarkQuote(result, false);
         }
       } catch {
@@ -447,6 +449,7 @@ export class SmartProvider implements MarketDataProvider {
 
     if (cgQuote) {
       this.cryptoQuoteCache.set(symbol, { data: cgQuote, timestamp: Date.now() });
+      this.mock.setLastKnownPrice(symbol, cgQuote.price);
       return cgQuote;
     }
 
@@ -459,6 +462,7 @@ export class SmartProvider implements MarketDataProvider {
 
     if (binQuote) {
       this.cryptoQuoteCache.set(symbol, { data: binQuote, timestamp: Date.now() });
+      this.mock.setLastKnownPrice(symbol, binQuote.price);
       return binQuote;
     }
 
