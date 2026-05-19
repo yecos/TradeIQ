@@ -633,6 +633,7 @@ export class SmartProvider implements MarketDataProvider {
         }
       } catch (error) {
         const errMsg = error instanceof Error ? error.message : 'unknown error';
+        console.warn(`[TradeIQ] ${provider.name} FAILED for getCandles(${symbol}, ${interval}): ${errMsg}`);
         // Auth errors — skip immediately, no point retrying
         if (errMsg.includes('FORBIDDEN') || errMsg.includes('AUTH') || errMsg.includes('401') || errMsg.includes('403')) {
           console.warn(`[TradeIQ] ${provider.name} auth error for ${symbol}, skipping: ${errMsg}`);
