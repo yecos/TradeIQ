@@ -365,8 +365,8 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
         </div>
       )}
 
-      {/* Connecting indicator */}
-      {wsState === 'connecting' || wsState === 'reconnecting' ? (
+      {/* Connecting / Reconnecting indicator */}
+      {(wsState === 'connecting' || wsState === 'reconnecting') && !isRealtime && (
         <div className="absolute top-1 right-12 flex items-center gap-1.5 bg-black/40 backdrop-blur-sm rounded px-2 py-0.5 z-10">
           <span className="relative flex h-2 w-2">
             <span className="animate-pulse absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75"></span>
@@ -374,7 +374,17 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
           </span>
           <span className="text-[9px] text-yellow-400 font-medium">CONECTANDO</span>
         </div>
-      ) : null}
+      )}
+
+      {/* Delayed indicator — WS not connected but data available via polling */}
+      {wsState === 'disconnected' && !isRealtime && realtimeCandles.length > 0 && (
+        <div className="absolute top-1 right-12 flex items-center gap-1.5 bg-black/40 backdrop-blur-sm rounded px-2 py-0.5 z-10">
+          <span className="relative flex h-2 w-2">
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+          </span>
+          <span className="text-[9px] text-blue-400 font-medium">DELAYED</span>
+        </div>
+      )}
 
       {/* Timezone indicator */}
       <div className="absolute bottom-1 right-1 bg-black/40 backdrop-blur-sm rounded px-1.5 py-0.5 z-10">

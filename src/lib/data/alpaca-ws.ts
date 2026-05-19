@@ -72,9 +72,10 @@ interface AlpacaWSQuoteMessage {
   t: string;         // Timestamp ISO string
 }
 
-const MAX_RECONNECT_ATTEMPTS = 3; // Keep low — Alpaca free tier has strict connection limits
-const BASE_RECONNECT_DELAY = 3000; // Start at 3s to avoid hitting rate limits
-const MAX_RECONNECT_DELAY = 15000;
+const MAX_RECONNECT_ATTEMPTS = 5;
+const BASE_RECONNECT_DELAY = 3000; // Start at 3s
+const MAX_RECONNECT_DELAY = 30000; // Max 30s between reconnects
+const CONNECTION_LIMIT_RETRY_DELAY = 15000; // Wait 15s before retrying on connection limit
 
 /**
  * AlpacaWebSocket — client-side WebSocket for real-time stock data.
@@ -112,12 +113,26 @@ export class AlpacaWebSocket {
    * Subscribe to real-time bar updates for a stock symbol.
    */
   subscribe(symbol: string, timeframe: string, callback: AlpacaBarCallback): void {
+    const wasConnected = this.connectionState === 'connected';
     this.unsubscribe();
     this.currentSymbol = symbol;
     this.currentTimeframe = timeframe;
     this.barCallback = callback;
     this.reconnectAttempts = 0;
-    this.connect();
+
+    // If we had an active connection, give the server time to clean it up
+    // before opening a new one. This prevents "connection limit exceeded" errors
+    // when rapidly switching symbols or refreshing the page.
+    if (wasConnected) {
+      this.setConnectionState('connecting');
+      setTimeout(() => {
+        if (!this.disposed && this.currentSymbol) {
+          this.connect();
+        }
+      }, 2000); // 2s grace period for server-side cleanup
+    } else {
+      this.connect();
+    }
   }
 
   /**
@@ -267,13 +282,23 @@ export class AlpacaWebSocket {
     if (msg.T === 'error') {
       const errorMsg = String(msg.msg || msg.code || '');
       console.warn('[TradeIQ AlpacaWS] Error:', errorMsg);
-      // If connection limit exceeded, stop reconnecting to avoid making it worse.
-      // The free Alpaca IEX tier only allows 1 concurrent WS connection.
+      // If connection limit exceeded, wait longer before retrying.
+      // The free Alpaca IEX tier only allows a few concurrent WS connections.
+      // The old connection will eventually time out on Alpaca's side (usually within 30s).
+      // Instead of giving up, we retry with a longer delay.
       if (errorMsg.includes('connection limit') || errorMsg.includes('limit exceeded')) {
-        console.warn('[TradeIQ AlpacaWS] Connection limit reached — stopping reconnect. Another session may be active.');
-        this.reconnectAttempts = MAX_RECONNECT_ATTEMPTS; // Prevent further reconnects
-        this.cleanup();
-        this.setConnectionState('disconnected');
+        console.warn('[TradeIQ AlpacaWS] Connection limit reached — will retry in 15s (old session may still be active)');
+        this.cleanupConnection(); // Close the rejected connection
+        // Don't count this as a regular reconnect attempt — use a fixed long delay
+        this.setConnectionState('reconnecting');
+        if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = setTimeout(() => {
+          if (!this.disposed && this.currentSymbol) {
+            this.reconnectAttempts = 0; // Reset — the old connection should be gone by now
+            this.connect();
+          }
+        }, CONNECTION_LIMIT_RETRY_DELAY);
+        return;
       }
       return;
     }

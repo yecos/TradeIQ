@@ -105,10 +105,12 @@ export default function TradeIQDashboard() {
   // WebSocket state from TradingChart
   const [isRealtimeWS, setIsRealtimeWS] = useState(false);
   const [wsLatency, setWsLatency] = useState<number | null>(null);
+  const [wsState, setWsState] = useState<WSConnectionState>('disconnected');
 
-  const handleWSStateChange = useCallback((_state: WSConnectionState, isRealtime: boolean, latencyMs: number | null) => {
+  const handleWSStateChange = useCallback((state: WSConnectionState, isRealtime: boolean, latencyMs: number | null) => {
     setIsRealtimeWS(isRealtime);
     setWsLatency(latencyMs);
+    setWsState(state);
   }, []);
 
   // Only show analysis if it matches the current symbol
@@ -771,13 +773,24 @@ export default function TradeIQDashboard() {
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
               </span>
+            ) : wsState === 'connecting' || wsState === 'reconnecting' ? (
+              <span className="relative flex h-2 w-2">
+                <span className="animate-pulse absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-yellow-500"></span>
+              </span>
+            ) : wsState === 'disconnected' && isLive ? (
+              <span className="relative flex h-2 w-2">
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+              </span>
             ) : isLive ? (
               <Wifi className="w-3 h-3 text-emerald-400" />
             ) : (
               <WifiOff className="w-3 h-3 text-yellow-500" />
             )}
             <div className="flex items-center gap-1">
-              {isRealtimeWS && <span className="text-[9px] font-bold text-emerald-400">WS</span>}
+              {isRealtimeWS && <span className="text-[9px] font-bold text-emerald-400">LIVE</span>}
+              {!isRealtimeWS && wsState === 'reconnecting' && <span className="text-[9px] font-bold text-yellow-400">WS</span>}
+              {!isRealtimeWS && wsState === 'disconnected' && isLive && <span className="text-[9px] font-bold text-blue-400">DELAYED</span>}
               {isRealtimeWS && wsLatency !== null && <span className="text-[8px] text-gray-500">{wsLatency}ms</span>}
               {hasCoinGecko && <span className="text-[9px] font-medium text-emerald-400">CG</span>}
               {hasCoinGecko && hasBinance && <span className="text-[8px] text-gray-600">+</span>}
