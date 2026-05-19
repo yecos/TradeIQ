@@ -77,3 +77,4 @@ prisma/*.db
 # Sandbox files
 /agent-ctx/
 worklog.mdTradeIQ/
+// env vars redeploy trigger 1779212667
