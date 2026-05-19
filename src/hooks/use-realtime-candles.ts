@@ -2,18 +2,11 @@
  * useRealtimeCandles — React hook that merges REST historical candles
  * with live WebSocket updates.
  *
- * How it works:
- * 1. Receives historical candles from the REST API (via TanStack Query)
- * 2. For crypto: subscribes to Binance WebSocket
- * 3. For stocks (if Alpaca keys configured): subscribes to Alpaca WebSocket
- * 4. On each WS message, updates the last candle (if forming) or appends a new one (if closed)
- * 5. Returns merged candles that update in real-time
- *
  * MetaTrader-like behavior:
  * - Binance WS sends kline updates every 1-2 seconds → smooth candle formation
  * - Alpaca WS sends 1m bars + individual trades → trades update the last candle's
  *   close in real-time between bar updates (tick-by-tick, like MetaTrader)
- * - Throttled updates (250ms) prevent excessive re-renders while keeping the chart smooth
+ * - Updates are batched with requestAnimationFrame for 60fps smooth rendering
  * - Volume aggregation: Binance sends cumulative volume (use max), Alpaca sends
  *   per-bar volume (use additive sum within a timeframe bucket)
  */
@@ -40,62 +33,59 @@ interface UseRealtimeCandlesResult {
   wsProvider: 'binance' | 'alpaca' | 'none';
   /** Current price from the latest WS update */
   currentPrice: number | null;
+  /** The last updated candle (for incremental chart update) */
+  lastUpdate: { candle: Candle; isAppend: boolean } | null;
 }
 
-// ─── Throttle utility ────────────────────────────────────────────────────
-// Ensures we don't re-render more than ~4 times per second (250ms intervals).
-// This prevents excessive React re-renders from high-frequency WS messages
-// while keeping the chart smooth enough for real-time trading.
+// ─── rAF-based batching ────────────────────────────────────────────────
+// Uses requestAnimationFrame to batch state updates to ~60fps.
+// This is the key to making the chart feel like MetaTrader — smooth,
+// responsive, and never skipping frames.
 
-function useThrottledState<T>(initialValue: T, intervalMs: number = 250): [T, React.Dispatch<React.SetStateAction<T>>] {
+function useRafBatchedState<T>(initialValue: T): [T, React.Dispatch<React.SetStateAction<T>>] {
   const [value, setValue] = useState<T>(initialValue);
   const pendingRef = useRef<T | null>(null);
-  const lastFlushRef = useRef<number>(0);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rafRef = useRef<number | null>(null);
 
   const flush = useCallback(() => {
     if (pendingRef.current !== null) {
       setValue(pendingRef.current);
       pendingRef.current = null;
     }
-    lastFlushRef.current = Date.now();
-    timerRef.current = null;
+    rafRef.current = null;
   }, []);
 
-  const throttledSetValue = useCallback((action: React.SetStateAction<T>) => {
-    const now = Date.now();
-    const elapsed = now - lastFlushRef.current;
-
+  const batchedSetValue = useCallback((action: React.SetStateAction<T>) => {
     if (action instanceof Function) {
-      // For function updaters, we need the current value
-      // We apply the updater to the pending value if one exists, otherwise to current
+      // For function updaters, apply to pending value if exists
+      // This chains multiple rapid updates correctly
       if (pendingRef.current !== null) {
         pendingRef.current = action(pendingRef.current);
       } else {
-        // Need to compute the new value
+        // Compute new value from current — we'll use the latest ref
+        // since value might be stale in this closure
         pendingRef.current = action(value);
       }
     } else {
       pendingRef.current = action;
     }
 
-    if (elapsed >= intervalMs) {
-      // Enough time has passed — flush immediately
-      flush();
-    } else if (!timerRef.current) {
-      // Schedule a flush for the remaining time
-      timerRef.current = setTimeout(flush, intervalMs - elapsed);
+    // Schedule a flush on the next animation frame if not already scheduled
+    if (rafRef.current === null) {
+      rafRef.current = requestAnimationFrame(flush);
     }
-  }, [value, intervalMs, flush]);
+  }, [value, flush]);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+      }
     };
   }, []);
 
-  return [value, throttledSetValue];
+  return [value, batchedSetValue];
 }
 
 /**
@@ -114,13 +104,13 @@ function mergeLiveCandle(
   liveCandle: Candle,
   source: 'bar' | 'trade' = 'bar',
   wsProvider: 'binance' | 'alpaca' = 'binance'
-): Candle[] {
+): { candles: Candle[]; isAppend: boolean } {
   if (historical.length === 0) {
     if (source === 'trade') {
       // Trade updates without any existing candles — can't create a candle from just a trade
-      return historical;
+      return { candles: historical, isAppend: false };
     }
-    return [liveCandle];
+    return { candles: [liveCandle], isAppend: true };
   }
 
   const lastCandle = historical[historical.length - 1];
@@ -154,27 +144,30 @@ function mergeLiveCandle(
         volume: newVolume,
       };
     }
-    return merged;
+    return { candles: merged, isAppend: false };
   }
 
   // New period — append
   if (liveCandle.time > lastCandle.time) {
     if (source === 'trade') {
       // Trade for a new period we don't have yet — create a minimal candle
-      return [...historical, {
-        time: liveCandle.time,
-        open: liveCandle.close, // We don't know the real open, use close as approximation
-        high: liveCandle.high,
-        low: liveCandle.low,
-        close: liveCandle.close,
-        volume: 0,
-      }];
+      return {
+        candles: [...historical, {
+          time: liveCandle.time,
+          open: liveCandle.close, // We don't know the real open, use close as approximation
+          high: liveCandle.high,
+          low: liveCandle.low,
+          close: liveCandle.close,
+          volume: 0,
+        }],
+        isAppend: true
+      };
     }
-    return [...historical, liveCandle];
+    return { candles: [...historical, liveCandle], isAppend: true };
   }
 
   // Older than our last candle — ignore
-  return historical;
+  return { candles: historical, isAppend: false };
 }
 
 /**
@@ -285,12 +278,13 @@ export function useRealtimeCandles(
   symbol: string,
   timeframe: string
 ): UseRealtimeCandlesResult {
-  // Use throttled state for merged candles to prevent excessive re-renders
-  const [mergedCandles, setMergedCandles] = useThrottledState<Candle[]>(historicalCandles, 200);
+  // Use rAF-batched state for merged candles — updates at 60fps for smooth rendering
+  const [mergedCandles, setMergedCandles] = useRafBatchedState<Candle[]>(historicalCandles);
   const [wsState, setWsState] = useState<WSConnectionState>('disconnected');
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
   const [wsProvider, setWsProvider] = useState<'binance' | 'alpaca' | 'none'>('none');
   const [currentPrice, setCurrentPrice] = useState<number | null>(null);
+  const [lastUpdate, setLastUpdate] = useState<{ candle: Candle; isAppend: boolean } | null>(null);
 
   // Refs for WS callback filtering
   const symbolRef = useRef(symbol);
@@ -317,6 +311,7 @@ export function useRealtimeCandles(
       // Symbol or timeframe changed — full reset
       setMergedCandles(historicalCandles);
       setCurrentPrice(null);
+      setLastUpdate(null);
     } else {
       // Same symbol/timeframe — smart merge to preserve WS updates
       setMergedCandles(prev => smartMergeHistorical(historicalCandles, prev));
@@ -337,7 +332,21 @@ export function useRealtimeCandles(
         return;
       }
 
-      setMergedCandles(prev => mergeLiveCandle(prev, update.candle, 'bar', 'binance'));
+      const result = mergeLiveCandle(
+        // We need the current merged candles for merging
+        // Access via the ref pattern to avoid stale closures
+        [], // Will be handled by the functional updater
+        update.candle,
+        'bar',
+        'binance'
+      );
+
+      // Use functional updater to always get latest state
+      setMergedCandles(prev => {
+        const mergeResult = mergeLiveCandle(prev, update.candle, 'bar', 'binance');
+        setLastUpdate({ candle: mergeResult.candles[mergeResult.candles.length - 1], isAppend: mergeResult.isAppend });
+        return mergeResult.candles;
+      });
       setCurrentPrice(update.candle.close);
     });
 
@@ -357,10 +366,6 @@ export function useRealtimeCandles(
   }, [symbol, timeframe]);
 
   // ─── Alpaca WS for Stocks/ETFs ───
-  //
-  // Alpaca WS sends 1m bars AND individual trades.
-  // - Bars: full OHLCV update every minute
-  // - Trades: tick-by-tick close price updates between bars (MetaTrader-like)
   useEffect(() => {
     if (!isStockSymbol(symbol)) {
       return;
@@ -384,16 +389,23 @@ export function useRealtimeCandles(
 
       if (update.source === 'trade') {
         // Trade update: tick-by-tick price change
-        // Aggregate the 1m bar time to the current timeframe bucket
         const aggregatedCandle = aggregateAlpacaBar(update.candle, timeframeRef.current);
 
-        setMergedCandles(prev => mergeLiveCandle(prev, aggregatedCandle, 'trade', 'alpaca'));
+        setMergedCandles(prev => {
+          const result = mergeLiveCandle(prev, aggregatedCandle, 'trade', 'alpaca');
+          setLastUpdate({ candle: result.candles[result.candles.length - 1], isAppend: result.isAppend });
+          return result.candles;
+        });
         setCurrentPrice(update.candle.close);
       } else {
         // Bar update: full 1m bar with OHLCV
         const aggregatedCandle = aggregateAlpacaBar(update.candle, timeframeRef.current);
 
-        setMergedCandles(prev => mergeLiveCandle(prev, aggregatedCandle, 'bar', 'alpaca'));
+        setMergedCandles(prev => {
+          const result = mergeLiveCandle(prev, aggregatedCandle, 'bar', 'alpaca');
+          setLastUpdate({ candle: result.candles[result.candles.length - 1], isAppend: result.isAppend });
+          return result.candles;
+        });
         setCurrentPrice(update.candle.close);
       }
     });
@@ -429,8 +441,6 @@ export function useRealtimeCandles(
 
   // Cleanup on unmount — clean up BOTH WS providers
   useEffect(() => {
-    // Also clean up on page unload (beforeunload) to prevent stale connections
-    // on Alpaca's side, which cause "connection limit exceeded" errors
     const handleBeforeUnload = () => {
       if (isWSCompatible(symbol)) {
         const ws = getBinanceWS();
@@ -466,5 +476,6 @@ export function useRealtimeCandles(
     latencyMs,
     wsProvider,
     currentPrice,
+    lastUpdate,
   };
 }

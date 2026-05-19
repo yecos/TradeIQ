@@ -21,8 +21,10 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
   const candlestickSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
   const prevSymbolRef = useRef<string>('');
-  const prevCandleCountRef = useRef<number>(0);
   const priceLineRef = useRef<any>(null);
+
+  // Track whether user has manually scrolled away from the latest price
+  const userScrolledAwayRef = useRef(false);
 
   // ─── Real-time WebSocket Integration ──────────────────────────────────
   const {
@@ -31,6 +33,7 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
     isRealtime,
     latencyMs,
     currentPrice,
+    lastUpdate,
   } = useRealtimeCandles(candles, symbol, timeframe);
 
   // Report WS state to parent
@@ -47,41 +50,19 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
     volume: number; time: string; change: number;
   } | null>(null);
 
-  // Memoize chart data transformation
-  const chartData = useMemo(() => {
-    const data = realtimeCandles;
-    if (!data.length) return { candles: [], volume: [] };
-
-    const candlesMapped = data.map(c => ({
-      time: c.time as Time,
-      open: c.open,
-      high: c.high,
-      low: c.low,
-      close: c.close,
-    }));
-
-    const volumeMapped = data.map(c => ({
-      time: c.time as Time,
-      value: c.volume,
-      color: c.close >= c.open ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-    }));
-
-    return { candles: candlesMapped, volume: volumeMapped };
-  }, [realtimeCandles]);
-
   // Get the last close for the current price line
   const lastClose = useMemo(() => {
     if (currentPrice !== null) return currentPrice;
-    if (chartData.candles.length === 0) return null;
-    return chartData.candles[chartData.candles.length - 1].close;
-  }, [currentPrice, chartData.candles]);
+    if (realtimeCandles.length === 0) return null;
+    return realtimeCandles[realtimeCandles.length - 1].close;
+  }, [currentPrice, realtimeCandles]);
 
   // Determine if price is up or down
   const isPriceUp = useMemo(() => {
-    if (chartData.candles.length < 2) return true;
-    const last = chartData.candles[chartData.candles.length - 1];
+    if (realtimeCandles.length < 2) return true;
+    const last = realtimeCandles[realtimeCandles.length - 1];
     return last.close >= last.open;
-  }, [chartData.candles]);
+  }, [realtimeCandles]);
 
   // Format price for display
   const formatPrice = useCallback((price: number): string => {
@@ -90,24 +71,26 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
     return price.toFixed(4);
   }, []);
 
-  // ─── Incremental Update Logic ─────────────────────────────────────────
-  const lastCandleTimeRef = useRef<number | null>(null);
-  const lastCandleCountRef = useRef<number>(0);
+  // Track whether the chart has been initialized with data
+  const chartInitializedRef = useRef(false);
+  // Track the last candle time we sent to the chart to avoid redundant updates
+  const lastChartTimeRef = useRef<number | null>(null);
+  const lastChartCloseRef = useRef<number | null>(null);
 
   // Crosshair move handler
   const handleCrosshairMove = useCallback((param: any) => {
     if (!param || !param.time || !param.seriesData) {
       // Crosshair left the chart — show last candle data
-      if (chartData.candles.length > 0) {
-        const last = chartData.candles[chartData.candles.length - 1];
+      if (realtimeCandles.length > 0) {
+        const last = realtimeCandles[realtimeCandles.length - 1];
         const change = last.close - last.open;
         setCrosshairData({
           open: last.open,
           high: last.high,
           low: last.low,
           close: last.close,
-          volume: chartData.volume[chartData.volume.length - 1]?.value ?? 0,
-          time: new Date((last.time as number) * 1000).toLocaleTimeString(),
+          volume: last.volume,
+          time: new Date(last.time * 1000).toLocaleTimeString(),
           change,
         });
       }
@@ -129,7 +112,7 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
         change: cd.close - cd.open,
       });
     }
-  }, [chartData.candles, chartData.volume]);
+  }, [realtimeCandles]);
 
   // Create chart once on mount
   useEffect(() => {
@@ -201,6 +184,17 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
     // Subscribe to crosshair move for OHLC overlay
     chart.subscribeCrosshairMove(handleCrosshairMove);
 
+    // Track user scrolling — if they scroll away from the edge, don't auto-scroll
+    const timeScale = chart.timeScale();
+    timeScale.subscribeVisibleLogicalRangeChange((range: { from: number; to: number } | null) => {
+      if (!range) return;
+      const dataLength = candlestickSeries.data()?.length ?? 0;
+      if (dataLength === 0) return;
+      // If user is looking at the last few candles, consider them "at the edge"
+      const distanceFromEnd = dataLength - range.to;
+      userScrolledAwayRef.current = distanceFromEnd > 8;
+    });
+
     chartRef.current = chart;
     candlestickSeriesRef.current = candlestickSeries;
     volumeSeriesRef.current = volumeSeries;
@@ -220,14 +214,182 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
 
     return () => {
       chart.unsubscribeCrosshairMove(handleCrosshairMove);
+      // Note: timeScale subscriptions are cleaned up when chart.remove() is called
       resizeObserver.disconnect();
       chart.remove();
       chartRef.current = null;
       candlestickSeriesRef.current = null;
       volumeSeriesRef.current = null;
       priceLineRef.current = null;
+      chartInitializedRef.current = false;
+      lastChartTimeRef.current = null;
+      lastChartCloseRef.current = null;
     };
   }, [handleCrosshairMove]);
+
+  // ─── Data Update Logic ────────────────────────────────────────────────
+  // KEY INSIGHT: Use `update()` API for incremental changes (O(1), smooth)
+  // Only use `setData()` for initial load or symbol change (expensive, full recalc)
+  // This is what makes the chart feel like MetaTrader instead of a laggy web chart.
+
+  // Initial data load / symbol change
+  useEffect(() => {
+    const series = candlestickSeriesRef.current;
+    const volSeries = volumeSeriesRef.current;
+    if (!series || !volSeries) return;
+    if (realtimeCandles.length === 0) return;
+
+    const isSymbolChange = prevSymbolRef.current !== symbol;
+
+    if (isSymbolChange) {
+      // Symbol changed — full data reload required
+      const candlesMapped = realtimeCandles.map(c => ({
+        time: c.time as Time,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+      }));
+      const volumeMapped = realtimeCandles.map(c => ({
+        time: c.time as Time,
+        value: c.volume,
+        color: c.close >= c.open ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+      }));
+
+      series.setData(candlesMapped);
+      volSeries.setData(volumeMapped);
+
+      // Fit content on first load
+      chartRef.current?.timeScale().fitContent();
+
+      prevSymbolRef.current = symbol;
+      chartInitializedRef.current = true;
+
+      // Track the last candle for incremental updates
+      const lastCandle = candlesMapped[candlesMapped.length - 1];
+      lastChartTimeRef.current = lastCandle.time as number;
+      lastChartCloseRef.current = lastCandle.close;
+
+      // Reset scroll tracking
+      userScrolledAwayRef.current = false;
+    }
+  }, [symbol, realtimeCandles.length > 0 ? symbol : '']);
+
+  // ─── Incremental Real-time Updates ────────────────────────────────────
+  // This is the CRITICAL path for MetaTrader-like behavior.
+  // Uses `series.update()` which is O(1) and renders at 60fps.
+  // `update()` both modifies existing bars and appends new bars.
+
+  useEffect(() => {
+    const series = candlestickSeriesRef.current;
+    const volSeries = volumeSeriesRef.current;
+    if (!series || !volSeries) return;
+    if (!chartInitializedRef.current) return;
+    if (realtimeCandles.length === 0) return;
+
+    // Check if this is a symbol change — skip incremental update
+    if (prevSymbolRef.current !== symbol) return;
+
+    const lastCandle = realtimeCandles[realtimeCandles.length - 1];
+    const lastTime = lastCandle.time;
+    const lastClose = lastCandle.close;
+
+    // Skip if nothing changed (same time AND same close — no visual update needed)
+    if (lastTime === lastChartTimeRef.current && lastClose === lastChartCloseRef.current) {
+      return;
+    }
+
+    // Build the lightweight-charts data objects for the last candle only
+    const candleUpdate = {
+      time: lastCandle.time as Time,
+      open: lastCandle.open,
+      high: lastCandle.high,
+      low: lastCandle.low,
+      close: lastCandle.close,
+    };
+
+    const volumeUpdate = {
+      time: lastCandle.time as Time,
+      value: lastCandle.volume,
+      color: lastCandle.close >= lastCandle.open ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+    };
+
+    // Use update() — this is the MetaTrader secret:
+    // - If time exists: updates the bar in place (O(1), no flicker)
+    // - If time is new: appends a new bar (also O(1))
+    try {
+      series.update(candleUpdate);
+      volSeries.update(volumeUpdate);
+    } catch (e) {
+      // Fallback: if update fails (e.g., out-of-order data), do a full setData
+      console.warn('[TradeIQ Chart] update() failed, falling back to setData()', e);
+      const candlesMapped = realtimeCandles.map(c => ({
+        time: c.time as Time,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+      }));
+      const volumeMapped = realtimeCandles.map(c => ({
+        time: c.time as Time,
+        value: c.volume,
+        color: c.close >= c.open ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+      }));
+      series.setData(candlesMapped);
+      volSeries.setData(volumeMapped);
+    }
+
+    // Update tracking refs
+    lastChartTimeRef.current = lastTime;
+    lastChartCloseRef.current = lastClose;
+
+    // Auto-scroll to latest candle (like MetaTrader)
+    // Only scroll if the user hasn't manually scrolled away
+    if (!userScrolledAwayRef.current) {
+      try {
+        chartRef.current?.timeScale().scrollToRealTime();
+      } catch {
+        // Ignore scroll errors
+      }
+    }
+  }, [realtimeCandles, symbol]);
+
+  // ─── Handle re-initialization when historical data arrives after mount ───
+  // This handles the case where the chart mounts before data arrives
+  useEffect(() => {
+    const series = candlestickSeriesRef.current;
+    const volSeries = volumeSeriesRef.current;
+    if (!series || !volSeries) return;
+    if (realtimeCandles.length === 0) return;
+    if (chartInitializedRef.current && prevSymbolRef.current === symbol) return;
+
+    // First data arrival — initialize the chart
+    const candlesMapped = realtimeCandles.map(c => ({
+      time: c.time as Time,
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close,
+    }));
+    const volumeMapped = realtimeCandles.map(c => ({
+      time: c.time as Time,
+      value: c.volume,
+      color: c.close >= c.open ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+    }));
+
+    series.setData(candlesMapped);
+    volSeries.setData(volumeMapped);
+    chartRef.current?.timeScale().fitContent();
+
+    prevSymbolRef.current = symbol;
+    chartInitializedRef.current = true;
+
+    const lastCandle = candlesMapped[candlesMapped.length - 1];
+    lastChartTimeRef.current = lastCandle.time as number;
+    lastChartCloseRef.current = lastCandle.close;
+
+    userScrolledAwayRef.current = false;
+  }, [realtimeCandles.length, symbol]);
 
   // ─── Current Price Line (using lightweight-charts built-in) ───────────
   // Update the price line whenever the last close changes.
@@ -257,72 +419,6 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
       title: '',
     });
   }, [lastClose, isPriceUp]);
-
-  // Update data — uses incremental updates for real-time, full setData for symbol changes
-  useEffect(() => {
-    if (!candlestickSeriesRef.current || !volumeSeriesRef.current) return;
-    if (chartData.candles.length === 0) return;
-
-    const isSymbolChange = prevSymbolRef.current !== symbol;
-    const candleCount = chartData.candles.length;
-    const lastCandle = chartData.candles[candleCount - 1];
-    const lastVolume = chartData.volume[candleCount - 1];
-    const prevCount = lastCandleCountRef.current;
-
-    if (isSymbolChange) {
-      // Symbol changed — full data reload
-      candlestickSeriesRef.current.setData(chartData.candles);
-      volumeSeriesRef.current.setData(chartData.volume);
-      chartRef.current?.timeScale().fitContent();
-      prevSymbolRef.current = symbol;
-      lastCandleTimeRef.current = lastCandle.time as number;
-      lastCandleCountRef.current = candleCount;
-      prevCandleCountRef.current = candleCount;
-    } else if (isRealtime && candleCount >= prevCount) {
-      // Real-time update — use incremental update for performance
-      if (candleCount > prevCount) {
-        // New candle added
-        candlestickSeriesRef.current.setData(chartData.candles);
-        volumeSeriesRef.current.setData(chartData.volume);
-      } else if (candleCount === prevCount && lastCandleTimeRef.current !== null) {
-        // Same number of candles — just the last one updated
-        try {
-          candlestickSeriesRef.current.update(lastCandle);
-          volumeSeriesRef.current.update(lastVolume);
-        } catch {
-          candlestickSeriesRef.current.setData(chartData.candles);
-          volumeSeriesRef.current.setData(chartData.volume);
-        }
-      } else {
-        candlestickSeriesRef.current.setData(chartData.candles);
-        volumeSeriesRef.current.setData(chartData.volume);
-      }
-
-      lastCandleTimeRef.current = lastCandle.time as number;
-      lastCandleCountRef.current = candleCount;
-
-      // Auto-scroll to keep latest candle visible
-      const timeScale = chartRef.current?.timeScale();
-      if (timeScale) {
-        const logicalRange = timeScale.getVisibleLogicalRange();
-        if (logicalRange && logicalRange.to >= candleCount - 5) {
-          timeScale.scrollToRealTime();
-        }
-      }
-    } else {
-      // Non-realtime or first load — full data set
-      candlestickSeriesRef.current.setData(chartData.candles);
-      volumeSeriesRef.current.setData(chartData.volume);
-
-      if (prevCandleCountRef.current === 0 || candleCount !== prevCandleCountRef.current) {
-        chartRef.current?.timeScale().fitContent();
-      }
-
-      lastCandleTimeRef.current = lastCandle.time as number;
-      lastCandleCountRef.current = candleCount;
-      prevCandleCountRef.current = candleCount;
-    }
-  }, [chartData, symbol, isRealtime]);
 
   return (
     <div className="relative w-full h-full">
