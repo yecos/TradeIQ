@@ -169,3 +169,22 @@ Stage Summary:
 - Alpaca WS gracefully falls back to polling after 3 connection limit errors
 - Prices update in real-time via WS (when connected) or polling (when DELAYED)
 - All 399 tests pass, build successful
+---
+Task ID: 1
+Agent: Main Agent
+Task: Rewrite realtime chart pipeline for MetaTrader-like behavior
+
+Work Log:
+- Read all files in the realtime data pipeline: use-realtime-candles.ts, trading-chart.tsx, alpaca-ws.ts, binance-ws.ts, smart-provider.ts, alpaca-provider.ts, market-data-interface.ts, provider-factory.ts, candles API route, page.tsx
+- Identified 6 critical bugs preventing real-time updates
+- Rewrote use-realtime-candles.ts: replaced 200ms throttle with requestAnimationFrame batching (60fps), added lastUpdate tracking for incremental updates
+- Rewrote trading-chart.tsx: switched from setData() to update() API for O(1) incremental updates, fixed auto-scroll with user scroll tracking, fixed initialization flow
+- Fixed TypeScript errors: subscribeVisibleLogicalRangeChange is on timeScale(), not chart
+- Verified build succeeds
+- Pushed to GitHub (commit 50429a9) to trigger Vercel deployment
+
+Stage Summary:
+- Key insight: The #1 issue was using setData() (full recalc, O(n), causes flicker) instead of update() (incremental, O(1), smooth like MetaTrader)
+- Second issue: 200ms throttle was too slow; replaced with rAF batching (~16ms)
+- Third issue: auto-scroll didn't track user scrolling, so chart would either never scroll or always scroll
+- Deployment triggered via git push to main
