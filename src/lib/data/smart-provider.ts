@@ -592,13 +592,15 @@ export class SmartProvider implements MarketDataProvider {
   /**
    * Check if candle data is fresh enough (last candle within acceptable age).
    * - For daily/weekly intervals: data should be within 48 hours
-   * - For intraday intervals: data should be within 2 hours
+   * - For intraday intervals: data should be within 24 hours
+   *   (relaxed from 2h — IEX free tier data is delayed outside market hours,
+   *    but the data is still valid and much better than mock)
    */
   private isDataFresh(candles: Candle[], interval: string): boolean {
     if (candles.length === 0) return false;
     const lastCandle = candles[candles.length - 1];
     const ageSeconds = Math.floor(Date.now() / 1000) - lastCandle.time;
-    const maxAge = ['1D', '1W'].includes(interval) ? 48 * 3600 : 2 * 3600;
+    const maxAge = ['1D', '1W'].includes(interval) ? 48 * 3600 : 24 * 3600;
     return ageSeconds < maxAge;
   }
 
