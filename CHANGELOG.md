@@ -6,6 +6,18 @@ El formato se basa en [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 
 ---
 
+## [0.25.0] - 2026-05-20
+
+### Corregido
+- **FIX**: Timestamps de velas no alineados con boundaries de intervalo — MockProvider generaba timestamps como `now - i * intervalSeconds` que producían velas empezando en segundos arbitrarios (ej: :34 en vez de :00). Esto impedía que lightweight-charts posicionara correctamente las velas y que el WS merge matcheara las velas en tiempo real. Ahora los timestamps se "snappean" al boundary más cercano del intervalo (`src/lib/data/mock-provider.ts`)
+- **FIX**: Conversión `utcToLocal()` destruía la alineación de timestamps en el gráfico — `trading-chart.tsx` convertía timestamps UTC a local time antes de pasarlos a lightweight-charts, lo cual: (1) desalineaba timestamps de interval boundaries, (2) causaba que WS updates (UTC) no matchearan con chart data (local), (3) creaba timestamps duplicados. Ahora se usan timestamps UTC directamente — lightweight-charts v5 los maneja correctamente (`src/components/trading/trading-chart.tsx`)
+- **FIX**: Servidor se crasheaba con peticiones 1m — MockProvider generaba hasta 2000 velas para intervalos cortos (1440 para 1m × 1 día), causando OOM/timeout en funciones serverless. Ahora el límite es 500 velas, suficiente para visualización sin exceder memoria (`src/lib/data/mock-provider.ts`)
+- **FIX**: Timeout del API route de candles muy agresivo — 9 segundos no era suficiente cuando múltiples providers fallaban en secuencia (Alpaca FORBIDDEN → Finnhub timeout → Polygon timeout → Mock). Aumentado a 12 segundos (`src/app/api/market/candles/route.ts`)
+- **FIX**: SmartProvider esperaba 8s en providers con errores de auth — cuando Alpaca retornaba FORBIDDEN (403), el SmartProvider aún esperaba el timeout completo antes de probar el siguiente provider. Ahora detecta errores de auth (401/403/FORBIDDEN/AUTH) y salta inmediatamente al siguiente provider (`src/lib/data/smart-provider.ts`)
+- **FIX**: SmartProvider rechazaba datos mock por "stale" — el freshness check `isDataFresh()` rechazaba datos del MockProvider aunque eran recién generados, forzando reintentos innecesarios. Ahora se omite el freshness check para el provider `mock` (`src/lib/data/smart-provider.ts`)
+
+---
+
 ## [0.24.0] - 2026-05-19
 
 ### Corregido

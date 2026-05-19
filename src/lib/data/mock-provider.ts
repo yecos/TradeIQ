@@ -104,15 +104,24 @@ function generateRealisticCandles(symbol: string, days: number = 180, interval: 
   const seed = seeds[symbol] || { base: 100 + Math.random() * 200, vol: 5, trend: 0.05, name: symbol };
   const candles: Candle[] = [];
   let price = seed.base;
-  const now = Math.floor(Date.now() / 1000);
   const intervalSeconds = intervalToSeconds(interval);
   const daySeconds = 86400;
 
   // Calculate total number of candles based on interval and lookback period
   // For daily: days candles. For intraday: more candles per day.
   const candlesPerDay = daySeconds / intervalSeconds;
-  // Cap at 2000 candles to avoid generating too many for short intervals
-  const totalCandles = Math.min(Math.floor(days * candlesPerDay), 2000);
+  // Cap at 500 candles to prevent OOM/timeout on serverless functions
+  // (1440 1m candles × 6 fields × ~10 bytes = ~86KB JSON — too large for some deployments)
+  const totalCandles = Math.min(Math.floor(days * candlesPerDay), 500);
+
+  // CRITICAL FIX: Snap timestamps to interval boundaries.
+  // Previously, `now - (i * intervalSeconds)` produced timestamps that didn't
+  // align with interval boundaries (e.g., 1m candle starting at :34 instead of :00).
+  // This caused lightweight-charts to display candles at wrong positions and
+  // prevented the WS merge from matching candles correctly (WS sends boundary-aligned timestamps).
+  const nowMs = Date.now();
+  // Snap current time DOWN to the nearest interval boundary
+  const currentBoundary = Math.floor(nowMs / (intervalSeconds * 1000)) * intervalSeconds;
 
   let hash = 0;
   for (let i = 0; i < symbol.length; i++) {
@@ -128,7 +137,7 @@ function generateRealisticCandles(symbol: string, days: number = 180, interval: 
   const volatilityScale = intervalSeconds >= daySeconds ? 1 : Math.sqrt(intervalSeconds / daySeconds);
 
   for (let i = totalCandles; i >= 0; i--) {
-    const time = now - (i * intervalSeconds);
+    const time = currentBoundary - (i * intervalSeconds);
     const periodReturn = (seededRandom() - 0.48) * (seed.vol / seed.base) * volatilityScale + (seed.trend / 252) * volatilityScale;
     const open = price;
     const close = price * (1 + periodReturn);

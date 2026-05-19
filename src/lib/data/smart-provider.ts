@@ -607,7 +607,8 @@ export class SmartProvider implements MarketDataProvider {
         );
         if (result && result.length > 0) {
           // Freshness check: if data is stale, try next provider
-          if (!this.isDataFresh(result, interval)) {
+          // But SKIP freshness check for mock — mock data is always "fresh" (generated now)
+          if (provider.name !== 'mock' && !this.isDataFresh(result, interval)) {
             console.warn(
               `[TradeIQ] ${provider.name} returned stale data for ${symbol} (last candle: ${new Date(result[result.length - 1].time * 1000).toISOString()}), trying next provider...`
             );
@@ -616,9 +617,15 @@ export class SmartProvider implements MarketDataProvider {
           return result;
         }
       } catch (error) {
+        const errMsg = error instanceof Error ? error.message : 'unknown error';
+        // Auth errors — skip immediately, no point retrying
+        if (errMsg.includes('FORBIDDEN') || errMsg.includes('AUTH') || errMsg.includes('401') || errMsg.includes('403')) {
+          console.warn(`[TradeIQ] ${provider.name} auth error for ${symbol}, skipping: ${errMsg}`);
+          continue;
+        }
         console.warn(
           `[TradeIQ] ${provider.name} failed for getCandles(${symbol}, ${interval}):`,
-          error instanceof Error ? error.message : 'unknown error'
+          errMsg
         );
       }
     }

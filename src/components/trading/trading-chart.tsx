@@ -5,7 +5,7 @@ import { createChart, ColorType, CandlestickSeries, HistogramSeries } from 'ligh
 import type { Time, IChartApi, ISeriesApi } from 'lightweight-charts';
 import type { Candle } from '@/lib/types';
 import { useRealtimeCandles } from '@/hooks/use-realtime-candles';
-import { utcToLocal, getTimezoneDisplay } from '@/lib/timezone';
+import { getTimezoneDisplay } from '@/lib/timezone';
 
 interface TradingChartProps {
   candles: Candle[];
@@ -39,15 +39,20 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
   // Timezone display label (computed once, not reactive)
   const [tzDisplay] = useState(() => getTimezoneDisplay());
 
-  // Memoize chart data transformation — convert UTC timestamps to local time
-  // so the chart displays times in the user's timezone.
-  // Internal data (hooks, WS merge) stays in UTC; only the display layer adjusts.
+  // Memoize chart data transformation.
+  // CRITICAL FIX: Do NOT convert UTC timestamps to local time via utcToLocal().
+  // Previously, utcToLocal() shifted timestamps by the timezone offset, which caused:
+  // 1. Timestamps no longer aligned with interval boundaries → lightweight-charts shows gaps
+  // 2. WS updates (boundary-aligned UTC) didn't match chart data (shifted) → candles "jump"
+  // 3. Duplicate timestamps when multiple UTC times map to the same local time
+  // lightweight-charts v5 correctly handles UTC timestamps and displays them
+  // using the browser's locale settings automatically.
   const chartData = useMemo(() => {
     const data = realtimeCandles;
     if (!data.length) return { candles: [], volume: [] };
 
     const candlesMapped = data.map(c => ({
-      time: utcToLocal(c.time) as Time,
+      time: c.time as Time,
       open: c.open,
       high: c.high,
       low: c.low,
@@ -55,7 +60,7 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
     }));
 
     const volumeMapped = data.map(c => ({
-      time: utcToLocal(c.time) as Time,
+      time: c.time as Time,
       value: c.volume,
       color: c.close >= c.open ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)',
     }));

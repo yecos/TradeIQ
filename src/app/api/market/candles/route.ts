@@ -12,10 +12,14 @@ export async function GET(request: NextRequest) {
 
   try {
     // Hard timeout to prevent serverless function timeout
+    // FIX: Increased from 9s to 12s — SmartProvider tries multiple providers
+    // (Alpaca → Finnhub → Polygon → Mock) which can take 8s+ when multiple
+    // providers timeout in sequence. The old 9s timeout was too aggressive,
+    // causing the server to crash before the fallback chain could complete.
     const candles = await Promise.race([
       getCandles(symbol, days, interval),
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Candle fetch timed out')), 9000)
+        setTimeout(() => reject(new Error('Candle fetch timed out')), 12000)
       ),
     ]);
     return NextResponse.json({ symbol, candles, interval });
