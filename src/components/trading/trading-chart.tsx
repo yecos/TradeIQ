@@ -174,7 +174,7 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
       lastCandleTimeRef.current = lastCandle.time as number;
       lastCandleCountRef.current = candleCount;
       prevCandleCountRef.current = candleCount;
-    } else if (isRealtime && prevCount > 0 && candleCount >= prevCount) {
+    } else if (isRealtime && candleCount >= prevCount) {
       // Real-time update — use incremental update for performance
       // Only update the last candle (much faster than setData for 1000+ candles)
 
@@ -195,6 +195,10 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
           candlestickSeriesRef.current.setData(chartData.candles);
           volumeSeriesRef.current.setData(chartData.volume);
         }
+      } else {
+        // Fewer candles than before (shouldn't happen normally) — full reload
+        candlestickSeriesRef.current.setData(chartData.candles);
+        volumeSeriesRef.current.setData(chartData.volume);
       }
 
       lastCandleTimeRef.current = lastCandle.time as number;
@@ -213,8 +217,10 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
       candlestickSeriesRef.current.setData(chartData.candles);
       volumeSeriesRef.current.setData(chartData.volume);
 
-      if (prevCandleCountRef.current === 0) {
-        // First load — fit to content
+      // FIX: Always fit content on first load to ensure candles are visible.
+      // Previously only fitted if prevCandleCountRef was 0, but this ref
+      // could be stale after symbol changes or initial render timing issues.
+      if (prevCandleCountRef.current === 0 || candleCount !== prevCandleCountRef.current) {
         chartRef.current?.timeScale().fitContent();
       }
 

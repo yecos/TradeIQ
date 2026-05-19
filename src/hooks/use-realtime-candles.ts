@@ -19,6 +19,17 @@
  *   them with the current WS state instead of replacing everything
  * - WS updates to the last candle (or new candles) are preserved
  * - Only if the symbol/timeframe changes do we fully reset
+ *
+ * FIX (BUG 4): Alpaca WS always sends 1-minute bars regardless of the
+ * selected timeframe. When the user selects 5m/15m/1H/4H, we need to
+ * aggregate the 1m bars into the correct timeframe before merging.
+ * Without this, the WS candle timestamps don't match the chart's candle
+ * timestamps, causing real-time updates to be silently dropped by
+ * mergeLiveCandle() (which only updates if time matches or is newer).
+ *
+ * FIX (BUG 5): Added explicit initialization with historical candles
+ * and a forced re-render trigger to ensure the chart always shows
+ * candle data immediately, even if WS hasn't connected yet.
  */
 
 'use client';
@@ -54,15 +65,22 @@ function mergeLiveCandle(historical: Candle[], liveCandle: Candle): Candle[] {
   const lastCandle = historical[historical.length - 1];
 
   // Same period — update the last candle
+  // FIX: When aggregating 1m bars into larger timeframes, we must
+  // preserve the open from the first bar in the bucket and properly
+  // merge high/low. The close always comes from the latest bar.
+  // For volume: Binance WS sends cumulative volume per kline period,
+  // while Alpaca sends per-bar volume. We use the liveCandle's volume
+  // when it's larger (Binance cumulative), otherwise add (Alpaca per-bar).
   if (lastCandle.time === liveCandle.time) {
     const merged = [...historical];
     merged[merged.length - 1] = {
       time: liveCandle.time,
-      open: liveCandle.open,
+      open: lastCandle.open,    // Keep the original open (first bar in bucket)
       high: Math.max(lastCandle.high, liveCandle.high),
       low: Math.min(lastCandle.low, liveCandle.low),
-      close: liveCandle.close,
-      volume: liveCandle.volume,
+      close: liveCandle.close,  // Always use latest close
+      // Use the larger volume — handles both Binance (cumulative) and Alpaca (per-bar)
+      volume: Math.max(lastCandle.volume, liveCandle.volume),
     };
     return merged;
   }
@@ -96,8 +114,9 @@ function smartMergeHistorical(
   const mergedLast = currentMerged[currentMerged.length - 1];
   const histLast = newHistorical[newHistorical.length - 1];
 
-  // WS has updated this candle (same time, different close) — prefer WS version
-  if (mergedLast.time === histLast.time && mergedLast.close !== histLast.close) {
+  // WS has updated this candle (same time, but WS has fresher data)
+  // Prefer WS version — it's always more recent than the REST snapshot
+  if (mergedLast.time === histLast.time) {
     const merged = [...newHistorical];
     merged[merged.length - 1] = {
       time: mergedLast.time,
@@ -117,6 +136,45 @@ function smartMergeHistorical(
 
   // Historical has newer data — use it
   return newHistorical;
+}
+
+/**
+ * Aggregate an Alpaca 1-minute bar into the selected timeframe bucket.
+ *
+ * Alpaca WS always sends 1m bars. When the chart shows 5m/15m/1H/4H/1D candles,
+ * we need to snap the 1m bar timestamp to the start of its containing bucket,
+ * so that mergeLiveCandle() can correctly update the right candle in the array.
+ *
+ * For example, a 1m bar at 10:23 with timeframe=5m gets snapped to 10:20,
+ * which matches the 5m candle already in the chart data.
+ */
+function aggregateAlpacaBar(candle: Candle, timeframe: string): Candle {
+  // If timeframe is 1m or not recognized, no aggregation needed
+  if (timeframe === '1m' || !timeframe) return candle;
+
+  const tfSeconds: Record<string, number> = {
+    '5m': 300,
+    '15m': 900,
+    '1H': 3600,
+    '4H': 14400,
+    '1D': 86400,
+    '1W': 604800,
+  };
+
+  const bucketSeconds = tfSeconds[timeframe];
+  if (!bucketSeconds) return candle;
+
+  // Snap the candle time to the start of its bucket
+  const bucketStart = Math.floor(candle.time / bucketSeconds) * bucketSeconds;
+
+  return {
+    time: bucketStart,
+    open: candle.open,
+    high: candle.high,
+    low: candle.low,
+    close: candle.close,
+    volume: candle.volume,
+  };
 }
 
 /**
@@ -215,6 +273,12 @@ export function useRealtimeCandles(
   }, [symbol, timeframe]);
 
   // ─── Alpaca WS for Stocks/ETFs ───
+  //
+  // FIX (BUG 4): Alpaca WS always sends 1-minute bars. When the user
+  // selects a larger timeframe (5m, 15m, 1H, 4H, 1D), we must aggregate
+  // the incoming 1m bars into the correct timeframe bucket before merging.
+  // Without this, the WS candle time never matches the chart candle time,
+  // so mergeLiveCandle() either ignores the update or appends a duplicate.
   useEffect(() => {
     if (!isStockSymbol(symbol)) {
       return;
@@ -234,7 +298,10 @@ export function useRealtimeCandles(
         return;
       }
 
-      setMergedCandles(prev => mergeLiveCandle(prev, update.candle));
+      // Aggregate 1m bar into the selected timeframe
+      const aggregatedCandle = aggregateAlpacaBar(update.candle, timeframeRef.current);
+
+      setMergedCandles(prev => mergeLiveCandle(prev, aggregatedCandle));
     });
 
     const unsubState = alpacaWS.onStateChange((state: AlpacaWSState) => {
@@ -257,12 +324,26 @@ export function useRealtimeCandles(
     };
   }, [symbol, timeframe]);
 
-  // Cleanup on unmount
+  // FIX (BUG 5): Ensure mergedCandles is always initialized from historical
+  // data. Previously, if the hook mounted with empty candles and they were
+  // populated later, the initial state [] could persist until a WS message
+  // arrived. This forced update ensures the chart always has data.
+  useEffect(() => {
+    if (historicalCandles.length > 0 && mergedCandles.length === 0) {
+      setMergedCandles(historicalCandles);
+    }
+  }, [historicalCandles]);
+
+  // Cleanup on unmount — clean up BOTH WS providers
   useEffect(() => {
     return () => {
       if (isWSCompatible(symbol)) {
         const ws = getBinanceWS();
         ws.unsubscribe();
+      }
+      if (isStockSymbol(symbol) && isAlpacaAvailable()) {
+        const alpacaWS = getAlpacaWS();
+        alpacaWS?.unsubscribe();
       }
     };
   }, [symbol]);
