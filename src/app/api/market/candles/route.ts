@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
     const candles = await Promise.race([
       getCandles(symbol, days, interval),
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Candle fetch timed out')), 12000)
+        setTimeout(() => reject(new Error('Candle fetch timed out')), 15000)
       ),
     ]);
     return NextResponse.json({ symbol, candles, interval });

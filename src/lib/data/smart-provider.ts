@@ -30,7 +30,7 @@ import { validateCandleArray, cleanCandleData, validateQuote, isPriceSane, isCan
  */
 
 /** Maximum time (ms) to wait for any single provider before falling back */
-const PROVIDER_TIMEOUT = 8000;
+const PROVIDER_TIMEOUT = 10000;
 
 /** Maximum time (ms) for the entire getMultipleQuotes operation */
 const _BATCH_TIMEOUT = 10000;
@@ -610,12 +610,15 @@ export class SmartProvider implements MarketDataProvider {
   ): Promise<Candle[]> {
     for (const provider of providers) {
       try {
+        console.warn(`[TradeIQ] Trying ${provider.name} for getCandles(${symbol}, ${interval})...`);
         const result = await withTimeout(
           provider.getCandles(symbol, days, interval),
           PROVIDER_TIMEOUT,
           `${provider.name}.getCandles(${symbol}, ${interval})`
         );
         if (result && result.length > 0) {
+          const lastClose = result[result.length - 1].close;
+          console.warn(`[TradeIQ] ${provider.name} returned ${result.length} candles for ${symbol} (last close: $${lastClose})`);
           // Freshness check: if data is stale, try next provider
           // But SKIP freshness check for mock — mock data is always "fresh" (generated now)
           if (provider.name !== 'mock' && !this.isDataFresh(result, interval)) {
