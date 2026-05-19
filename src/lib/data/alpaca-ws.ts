@@ -112,8 +112,19 @@ export class AlpacaWebSocket {
 
   /**
    * Subscribe to real-time bar updates for a stock symbol.
+   *
+   * If already connected to the same symbol, just updates the callback
+   * without disconnecting — this prevents the reconnection loop that
+   * occurs when React re-runs the effect.
    */
   subscribe(symbol: string, timeframe: string, callback: AlpacaBarCallback): void {
+    // If already connected to the same symbol, just update the callback
+    if (this.connectionState === 'connected' && this.currentSymbol === symbol) {
+      this.barCallback = callback;
+      console.log(`[TradeIQ AlpacaWS] Already connected to ${symbol}, updated callback`);
+      return;
+    }
+
     const wasConnected = this.connectionState === 'connected';
     this.unsubscribe();
     this.currentSymbol = symbol;
@@ -130,7 +141,7 @@ export class AlpacaWebSocket {
         if (!this.disposed && this.currentSymbol) {
           this.connect();
         }
-      }, 2000); // 2s grace period for server-side cleanup
+      }, 1000); // Reduced from 2s to 1s — faster reconnection on symbol change
     } else {
       this.connect();
     }

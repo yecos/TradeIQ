@@ -160,9 +160,19 @@ export class BinanceKlineWS {
 
   /**
    * Subscribe to real-time kline updates for a symbol and interval.
-   * Automatically disconnects from any previous subscription.
+   *
+   * If already connected to the same symbol+interval, just updates the callback
+   * without disconnecting — this prevents the reconnection loop that
+   * occurs when React re-runs the effect.
    */
   subscribe(symbol: string, interval: string, callback: KlineCallback): void {
+    // If already connected to the same symbol+interval, just update the callback
+    if (this.connectionState === 'connected' && this.currentSymbol === symbol && this.currentInterval === interval) {
+      this.callback = callback;
+      console.log(`[TradeIQ WS] Already connected to ${symbol}@${interval}, updated callback`);
+      return;
+    }
+
     // Unsubscribe from any existing stream
     this.unsubscribe();
 
