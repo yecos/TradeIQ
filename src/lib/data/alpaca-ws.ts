@@ -97,6 +97,7 @@ export class AlpacaWebSocket {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private lastMessageTime: number | null = null;
   private disposed = false;
+  private connectionLimitHits = 0; // Track how many times we hit connection limit
   // Track the current forming bar for trade-based close updates
   private currentBarClose: number | null = null;
   private currentBarHigh: number | null = null;
@@ -264,6 +265,7 @@ export class AlpacaWebSocket {
       console.log('[TradeIQ AlpacaWS] Authenticated successfully');
       this.setConnectionState('connected');
       this.reconnectAttempts = 0;
+      this.connectionLimitHits = 0; // Reset connection limit counter on successful auth
 
       // Subscribe to both bars AND trades for the current symbol.
       // Bars give us OHLCV every minute, trades give us tick-by-tick price
@@ -287,14 +289,23 @@ export class AlpacaWebSocket {
       // The old connection will eventually time out on Alpaca's side (usually within 30s).
       // Instead of giving up, we retry with a longer delay.
       if (errorMsg.includes('connection limit') || errorMsg.includes('limit exceeded')) {
-        console.warn('[TradeIQ AlpacaWS] Connection limit reached — will retry in 15s (old session may still be active)');
-        this.cleanupConnection(); // Close the rejected connection
-        // Don't count this as a regular reconnect attempt — use a fixed long delay
+        this.connectionLimitHits++;
+        console.warn(`[TradeIQ AlpacaWS] Connection limit reached (hit #${this.connectionLimitHits}) — retrying in 15s`);
+        this.cleanupConnection();
+        // After 3 consecutive connection limit errors, give up and set state to disconnected.
+        // The chart will show "DELAYED" indicator and rely on REST polling instead.
+        if (this.connectionLimitHits >= 3) {
+          console.warn('[TradeIQ AlpacaWS] Connection limit hit 3 times — falling back to polling mode. Close other tabs/sessions and refresh.');
+          this.cleanup();
+          this.setConnectionState('disconnected');
+          return;
+        }
+        // Retry with a fixed long delay — the old connection should time out on Alpaca's side
         this.setConnectionState('reconnecting');
         if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
         this.reconnectTimer = setTimeout(() => {
           if (!this.disposed && this.currentSymbol) {
-            this.reconnectAttempts = 0; // Reset — the old connection should be gone by now
+            this.reconnectAttempts = 0;
             this.connect();
           }
         }, CONNECTION_LIMIT_RETRY_DELAY);

@@ -429,7 +429,23 @@ export function useRealtimeCandles(
 
   // Cleanup on unmount — clean up BOTH WS providers
   useEffect(() => {
+    // Also clean up on page unload (beforeunload) to prevent stale connections
+    // on Alpaca's side, which cause "connection limit exceeded" errors
+    const handleBeforeUnload = () => {
+      if (isWSCompatible(symbol)) {
+        const ws = getBinanceWS();
+        ws.unsubscribe();
+      }
+      if (isStockSymbol(symbol) && isAlpacaAvailable()) {
+        const alpacaWS = getAlpacaWS();
+        alpacaWS?.unsubscribe();
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
     return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
       if (isWSCompatible(symbol)) {
         const ws = getBinanceWS();
         ws.unsubscribe();

@@ -22,6 +22,7 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
   const prevSymbolRef = useRef<string>('');
   const prevCandleCountRef = useRef<number>(0);
+  const priceLineRef = useRef<any>(null);
 
   // ─── Real-time WebSocket Integration ──────────────────────────────────
   const {
@@ -75,6 +76,13 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
     return chartData.candles[chartData.candles.length - 1].close;
   }, [currentPrice, chartData.candles]);
 
+  // Determine if price is up or down
+  const isPriceUp = useMemo(() => {
+    if (chartData.candles.length < 2) return true;
+    const last = chartData.candles[chartData.candles.length - 1];
+    return last.close >= last.open;
+  }, [chartData.candles]);
+
   // Format price for display
   const formatPrice = useCallback((price: number): string => {
     if (price >= 1000) return price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -92,10 +100,7 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
       // Crosshair left the chart — show last candle data
       if (chartData.candles.length > 0) {
         const last = chartData.candles[chartData.candles.length - 1];
-        const prevClose = chartData.candles.length > 1
-          ? chartData.candles[chartData.candles.length - 2].close
-          : last.open;
-        const change = last.close - prevClose;
+        const change = last.close - last.open;
         setCrosshairData({
           open: last.open,
           high: last.high,
@@ -114,7 +119,6 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
 
     if (candleData) {
       const cd = candleData as any;
-      const prevClose = cd.open; // Approximate — the change from open
       setCrosshairData({
         open: cd.open,
         high: cd.high,
@@ -144,12 +148,12 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
         horzLines: { color: 'rgba(255, 255, 255, 0.02)' },
       },
       crosshair: {
-        mode: 0, // Normal mode (crosshair moves freely)
+        mode: 0,
         vertLine: {
           color: 'rgba(255, 255, 255, 0.08)',
           labelBackgroundColor: '#1e293b',
           width: 1,
-          style: 2, // Dashed
+          style: 2,
         },
         horzLine: {
           color: 'rgba(255, 255, 255, 0.08)',
@@ -166,7 +170,7 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
         borderColor: 'rgba(255, 255, 255, 0.04)',
         timeVisible: true,
         secondsVisible: false,
-        rightOffset: 5, // Leave space on the right for the price line label
+        rightOffset: 5,
         barSpacing: 8,
         minBarSpacing: 2,
       },
@@ -221,8 +225,38 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
       chartRef.current = null;
       candlestickSeriesRef.current = null;
       volumeSeriesRef.current = null;
+      priceLineRef.current = null;
     };
   }, [handleCrosshairMove]);
+
+  // ─── Current Price Line (using lightweight-charts built-in) ───────────
+  // Update the price line whenever the last close changes.
+  // This is MetaTrader-style: a horizontal line at the current price
+  // with a label showing the price on the right price scale.
+  useEffect(() => {
+    if (!candlestickSeriesRef.current || lastClose === null) return;
+
+    // Remove existing price line
+    if (priceLineRef.current) {
+      try {
+        candlestickSeriesRef.current.removePriceLine(priceLineRef.current);
+      } catch {
+        // Price line may have been removed already
+      }
+      priceLineRef.current = null;
+    }
+
+    // Create a new price line at the current close
+    const lineColor = isPriceUp ? '#22c55e' : '#ef4444';
+    priceLineRef.current = candlestickSeriesRef.current.createPriceLine({
+      price: lastClose,
+      color: lineColor,
+      lineWidth: 1,
+      lineStyle: 2, // Dashed
+      axisLabelVisible: true,
+      title: '',
+    });
+  }, [lastClose, isPriceUp]);
 
   // Update data — uses incremental updates for real-time, full setData for symbol changes
   useEffect(() => {
@@ -247,22 +281,19 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
     } else if (isRealtime && candleCount >= prevCount) {
       // Real-time update — use incremental update for performance
       if (candleCount > prevCount) {
-        // New candle added — update the series
+        // New candle added
         candlestickSeriesRef.current.setData(chartData.candles);
         volumeSeriesRef.current.setData(chartData.volume);
       } else if (candleCount === prevCount && lastCandleTimeRef.current !== null) {
-        // Same number of candles — just the last one updated (price moved)
-        // Use lightweight-charts update() for buttery smooth animation
+        // Same number of candles — just the last one updated
         try {
           candlestickSeriesRef.current.update(lastCandle);
           volumeSeriesRef.current.update(lastVolume);
         } catch {
-          // update() can fail if the time doesn't match any existing bar
           candlestickSeriesRef.current.setData(chartData.candles);
           volumeSeriesRef.current.setData(chartData.volume);
         }
       } else {
-        // Fewer candles than before — full reload
         candlestickSeriesRef.current.setData(chartData.candles);
         volumeSeriesRef.current.setData(chartData.volume);
       }
@@ -270,7 +301,7 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
       lastCandleTimeRef.current = lastCandle.time as number;
       lastCandleCountRef.current = candleCount;
 
-      // Auto-scroll to keep latest candle visible (only if user is near the edge)
+      // Auto-scroll to keep latest candle visible
       const timeScale = chartRef.current?.timeScale();
       if (timeScale) {
         const logicalRange = timeScale.getVisibleLogicalRange();
@@ -330,24 +361,6 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
                 : crosshairData.volume.toFixed(0)}</span>
             </span>
           )}
-        </div>
-      )}
-
-      {/* ─── Current Price Line (MetaTrader-style) ───────────────────────── */}
-      {lastClose !== null && (
-        <div
-          className="absolute right-0 z-10 pointer-events-none select-none"
-          style={{
-            // Position at the right edge, aligned with the price scale
-            top: '50%', // Approximate — lightweight-charts manages the exact position
-          }}
-        >
-          <div className={`px-1.5 py-0.5 text-[9px] font-mono font-bold whitespace-nowrap ${
-            crosshairData && crosshairData.change >= 0 ? 'bg-emerald-600 text-white' : 'bg-red-600 text-white'
-          }`}
-          style={{ borderRadius: '2px 0 0 2px' }}>
-            ${formatPrice(lastClose)}
-          </div>
         </div>
       )}
 
