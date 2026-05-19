@@ -653,16 +653,20 @@ export class SmartProvider implements MarketDataProvider {
       this.mock.setLastKnownPrice(symbol, lastPrice);
     } else {
       // No cached quote price — try a quick quote fetch to anchor the mock.
-      // This is important in serverless environments where each request may
-      // create a fresh SmartProvider instance with no price history.
+      // This is important when Alpaca bars fail (e.g., IEX free tier doesn't
+      // support the bars endpoint, only snapshots) but quotes work.
       try {
-        const quickQuote = await withTimeout(
-          this.getStockProvider().getQuote(symbol),
-          3000, // Short timeout — don't slow down the candle response
-          `quickQuote(${symbol})`
-        );
-        if (quickQuote?.price) {
-          this.mock.setLastKnownPrice(symbol, quickQuote.price);
+        const quoteProvider = this.alpaca || this.finnhub || this.polygon;
+        if (quoteProvider) {
+          const quickQuote = await withTimeout(
+            quoteProvider.getQuote(symbol),
+            3000, // Short timeout — don't slow down the candle response
+            `quickQuote(${symbol})`
+          );
+          if (quickQuote?.price) {
+            this.mock.setLastKnownPrice(symbol, quickQuote.price);
+            console.warn(`[TradeIQ] Anchored mock candles for ${symbol} to real price $${quickQuote.price}`);
+          }
         }
       } catch {
         // Quick quote failed — use default seed price

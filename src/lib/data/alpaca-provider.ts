@@ -414,7 +414,7 @@ export class AlpacaProvider implements MarketDataProvider {
         throw new Error('ALPACA_AUTH: Invalid API key or secret');
       }
       if (response.status === 403) {
-        throw new Error('ALPACA_FORBIDDEN: Access denied (check your plan)');
+        throw new Error('ALPACA_FORBIDDEN: subscription does not permit this data endpoint (bars require paid plan, use snapshots instead)');
       }
       if (response.status === 429) {
         throw new Error('ALPACA_RATE_LIMIT: Rate limit exceeded (200/min)');
