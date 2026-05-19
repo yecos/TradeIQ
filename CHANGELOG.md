@@ -6,6 +6,22 @@ El formato se basa en [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 
 ---
 
+## [0.24.0] - 2026-05-19
+
+### Corregido
+- **FIX**: BinanceProvider usaba `days` como `limit` en la API de klines — para timeframe 1m con days=1, solo retornaba 1 vela en vez de ~1440. Ahora usa `estimateCandleCount(days, interval)` que calcula correctamente el número de velas según el intervalo (`src/lib/data/binance-provider.ts`)
+- **FIX**: AlpacaProvider usaba `days` como `limit` en la API de bars — mismo bug que BinanceProvider: 1m × 1 día = 1 vela. Ahora usa `estimateCandleCount()` tanto para stocks como crypto (`src/lib/data/alpaca-provider.ts`)
+- **FIX**: MockProvider ignoraba completamente el parámetro `interval` — siempre generaba velas diarias (86400s de spacing). Esto causaba que los charts intradía mostraran velas diarias en escala de minutos, haciendo el gráfico parecer vacío/roto. Ahora genera velas con el spacing correcto según el intervalo (`src/lib/data/mock-provider.ts`)
+- **FIX**: useRealtimeCandles sobreescribía las actualizaciones WS al refetch REST — cuando TanStack Query refetchaba candles, `setMergedCandles(historicalCandles)` reemplazaba todas las actualizaciones en tiempo real con datos REST stale, causando que las velas "saltaran atrás" periódicamente. Ahora usa `smartMergeHistorical()` que preserva actualizaciones WS al último candle mientras incorpora nuevas velas cerradas del REST (`src/hooks/use-realtime-candles.ts`)
+
+### Cambios
+- **CHANGE**: BinanceProvider ahora incluye `startTime` parameter en la query de klines para obtener velas del rango temporal correcto, no solo las más recientes
+- **CHANGE**: MockProvider genera velas con volatilidad escalada para intradía (usando sqrt(intervalSeconds/daySeconds)) en vez de usar volatilidad diaria completa que causaba movimientos irreales en velas de 1 minuto
+- **CHANGE**: MockProvider escala volumen proporcionalmente al intervalo (volume × intervalSeconds/86400) para volúmenes más realistas en timeframes intradía
+- **CHANGE**: useRealtimeCandles solo hace full reset cuando cambia symbol/timeframe, no cuando cambian los datos históricos por refetch
+
+---
+
 ## [0.23.1] - 2026-05-19
 
 ### Corregido

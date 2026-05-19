@@ -36,6 +36,33 @@ const ALPACA_TIMEFRAMES: Record<string, string> = {
 };
 
 /**
+ * Convert our interval format to milliseconds.
+ */
+function intervalToMs(interval: string): number {
+  const map: Record<string, number> = {
+    '1m': 60_000,
+    '5m': 300_000,
+    '15m': 900_000,
+    '1H': 3_600_000,
+    '4H': 14_400_000,
+    '1D': 86_400_000,
+    '1W': 604_800_000,
+  };
+  return map[interval] || 86_400_000;
+}
+
+/**
+ * Estimate the number of candles that fit in `days` for a given interval.
+ * FIX: Previously `days` was used as `limit`, so 1m × 1 day = 1 candle (WRONG).
+ */
+function estimateCandleCount(days: number, interval: string): number {
+  const intervalMs = intervalToMs(interval);
+  const totalMs = days * 86_400_000;
+  const count = Math.ceil(totalMs / intervalMs);
+  return Math.max(count, 1);
+}
+
+/**
  * AlpacaProvider — server-side market data via the official SDK.
  *
  * Uses the Alpaca Market Data API for:
@@ -84,13 +111,17 @@ export class AlpacaProvider implements MarketDataProvider {
     const now = new Date();
     const start = new Date(now.getTime() - days * 86400_000);
 
+    // FIX: Convert days + interval to proper candle count.
+    // Previously `days` was used as `limit`, so 1m × 1 day = 1 candle (WRONG).
+    const candleLimit = Math.min(estimateCandleCount(days, interval), 10000);
+
     // Use the Alpaca Market Data REST API directly
     // GET /v2/stocks/{symbol}/bars
     const url = `${this.dataBaseUrl}/v2/stocks/${encodeURIComponent(symbol.toUpperCase())}/bars` +
       `?timeframe=${alpacaTimeframe}` +
       `&start=${start.toISOString()}` +
       `&end=${now.toISOString()}` +
-      `&limit=${Math.min(days, 10000)}` +
+      `&limit=${candleLimit}` +
       `&adjustment=raw`;
 
     const data = await this.fetchFromAlpaca<AlpacaBarsResponse>(url);
@@ -324,7 +355,7 @@ export class AlpacaProvider implements MarketDataProvider {
       `&timeframe=${alpacaTimeframe}` +
       `&start=${start.toISOString()}` +
       `&end=${now.toISOString()}` +
-      `&limit=${Math.min(days, 10000)}`;
+      `&limit=${Math.min(estimateCandleCount(days, interval), 10000)}`;
 
     const data = await this.fetchFromAlpaca<AlpacaCryptoBarsResponse>(url);
 

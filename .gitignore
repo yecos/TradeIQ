@@ -76,4 +76,4 @@ prisma/*.db
 
 # Sandbox files
 /agent-ctx/
-worklog.md
+worklog.mdTradeIQ/

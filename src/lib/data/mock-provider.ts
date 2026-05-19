@@ -33,8 +33,8 @@ export class MockProvider implements MarketDataProvider {
     'LINK': { base: 15, vol: 0.8, trend: 0.08, name: 'Chainlink', type: 'crypto' },
   };
 
-  async getCandles(symbol: string, days: number = 180, _interval: string = '1D'): Promise<Candle[]> {
-    return generateRealisticCandles(symbol, days);
+  async getCandles(symbol: string, days: number = 180, interval: string = '1D'): Promise<Candle[]> {
+    return generateRealisticCandles(symbol, days, interval);
   }
 
   async getQuote(symbol: string): Promise<Quote> {
@@ -67,13 +67,52 @@ export class MockProvider implements MarketDataProvider {
 
 // --- Internal generation functions (moved from market-data.ts) ---
 
-function generateRealisticCandles(symbol: string, days: number = 180): Candle[] {
+/**
+ * Convert interval string to seconds.
+ */
+function intervalToSeconds(interval: string): number {
+  const map: Record<string, number> = {
+    '1m': 60,
+    '5m': 300,
+    '15m': 900,
+    '1H': 3600,
+    '4H': 14400,
+    '1D': 86400,
+    '1W': 604800,
+  };
+  return map[interval] || 86400;
+}
+
+/**
+ * Generate realistic candles for any interval.
+ *
+ * FIX: Previously this function ignored the `interval` parameter and always
+ * generated daily candles (86400s spacing). This broke intraday charts because
+ * the chart would receive daily-spaced candles but display them on an intraday
+ * scale, making the chart appear empty or with huge gaps.
+ *
+ * Now the function properly generates candles at the correct interval spacing:
+ * - 1m: one candle per minute
+ * - 5m: one candle per 5 minutes
+ * - etc.
+ *
+ * The `days` parameter determines the total lookback period, and the interval
+ * determines how many candles fit in that period.
+ */
+function generateRealisticCandles(symbol: string, days: number = 180, interval: string = '1D'): Candle[] {
   const seeds = MockProvider.SYMBOL_SEEDS;
   const seed = seeds[symbol] || { base: 100 + Math.random() * 200, vol: 5, trend: 0.05, name: symbol };
   const candles: Candle[] = [];
   let price = seed.base;
   const now = Math.floor(Date.now() / 1000);
+  const intervalSeconds = intervalToSeconds(interval);
   const daySeconds = 86400;
+
+  // Calculate total number of candles based on interval and lookback period
+  // For daily: days candles. For intraday: more candles per day.
+  const candlesPerDay = daySeconds / intervalSeconds;
+  // Cap at 2000 candles to avoid generating too many for short intervals
+  const totalCandles = Math.min(Math.floor(days * candlesPerDay), 2000);
 
   let hash = 0;
   for (let i = 0; i < symbol.length; i++) {
@@ -85,18 +124,23 @@ function generateRealisticCandles(symbol: string, days: number = 180): Candle[] 
     return (hash & 0x7fffffff) / 0x7fffffff;
   };
 
-  for (let i = days; i >= 0; i--) {
-    const time = now - (i * daySeconds);
-    const dailyReturn = (seededRandom() - 0.48) * seed.vol / seed.base + seed.trend / 252;
+  // Scale volatility for intraday — daily volatility is too large for minute candles
+  const volatilityScale = intervalSeconds >= daySeconds ? 1 : Math.sqrt(intervalSeconds / daySeconds);
+
+  for (let i = totalCandles; i >= 0; i--) {
+    const time = now - (i * intervalSeconds);
+    const periodReturn = (seededRandom() - 0.48) * (seed.vol / seed.base) * volatilityScale + (seed.trend / 252) * volatilityScale;
     const open = price;
-    const close = price * (1 + dailyReturn);
-    const highExtra = Math.abs(seededRandom() * seed.vol * 0.5);
-    const lowExtra = Math.abs(seededRandom() * seed.vol * 0.5);
+    const close = price * (1 + periodReturn);
+    const highExtra = Math.abs(seededRandom() * seed.vol * 0.3 * volatilityScale);
+    const lowExtra = Math.abs(seededRandom() * seed.vol * 0.3 * volatilityScale);
     const high = Math.max(open, close) + highExtra;
     const low = Math.min(open, close) - lowExtra;
+    // Scale volume proportionally for intraday
+    const volumeScale = intervalSeconds >= daySeconds ? 1 : intervalSeconds / daySeconds;
     const volume = seed.type === 'crypto'
-      ? Math.floor(1_000_000_000 + seededRandom() * 5_000_000_000)  // Crypto has higher volumes
-      : Math.floor(50_000_000 + seededRandom() * 100_000_000);
+      ? Math.floor((1_000_000_000 + seededRandom() * 5_000_000_000) * volumeScale)
+      : Math.floor((50_000_000 + seededRandom() * 100_000_000) * volumeScale);
 
     candles.push({
       time,
@@ -117,7 +161,7 @@ function generateQuote(symbol: string): Quote {
   const seeds = MockProvider.SYMBOL_SEEDS;
   const name = seeds[symbol]?.name || symbol;
 
-  const candles = generateRealisticCandles(symbol, 2);
+  const candles = generateRealisticCandles(symbol, 2, '1D');
   const current = candles[candles.length - 1];
   const prev = candles[candles.length - 2];
   const change = current.close - prev.close;

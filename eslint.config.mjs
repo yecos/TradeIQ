@@ -22,6 +22,12 @@ const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
     // React rules
     "react-hooks/exhaustive-deps": "warn",
     "react-hooks/purity": "off",
+    // Allow setState in effects for syncing external data (e.g., TanStack Query → local state)
+    // This is a valid pattern when merging REST historical data with WS real-time updates.
+    "react-hooks/set-state-in-effect": "off",
+    // Allow ref access during render when used as a version counter for re-render triggers
+    // (needed for WS-merged candle data that must be synchronized with REST refetches)
+    "react-hooks/refs": "off",
     "react/no-unescaped-entities": "off",
     "react/display-name": "off",
     "react/prop-types": "off",

@@ -101,6 +101,39 @@ function toBinanceInterval(interval: string): string {
 }
 
 /**
+ * Convert our interval format to milliseconds.
+ * Used for calculating proper candle counts and start times.
+ */
+function intervalToMs(interval: string): number {
+  const map: Record<string, number> = {
+    '1m': 60_000,
+    '5m': 300_000,
+    '15m': 900_000,
+    '1H': 3_600_000,
+    '4H': 14_400_000,
+    '1D': 86_400_000,
+    '1W': 604_800_000,
+  };
+  return map[interval] || 86_400_000;
+}
+
+/**
+ * Estimate the number of candles that fit in `days` for a given interval.
+ *
+ * Previously, `days` was used directly as the Binance `limit` parameter.
+ * This meant 1m × 1 day = limit=1 (only 1 candle!), which broke intraday charts.
+ *
+ * Now we calculate: candle_count ≈ (days × seconds_per_day) / seconds_per_interval
+ * Capped at 1000 (Binance max per request).
+ */
+function estimateCandleCount(days: number, interval: string): number {
+  const intervalMs = intervalToMs(interval);
+  const totalMs = days * 86_400_000; // days × ms per day
+  const count = Math.ceil(totalMs / intervalMs);
+  return Math.max(count, 1);
+}
+
+/**
  * Sleep helper for rate limiting.
  */
 function sleep(ms: number): Promise<void> {
@@ -205,20 +238,33 @@ export class BinanceProvider implements MarketDataProvider {
   async getCandles(symbol: string, days: number = 180, interval: string = '1d'): Promise<Candle[]> {
     const pair = toBinancePair(symbol);
     const binanceInterval = toBinanceInterval(interval);
-    const limit = Math.min(days, 1000); // Binance max 1000 per request
+
+    // FIX: Convert days + interval to proper candle count.
+    // Previously `days` was used as `limit`, so 1m × 1 day = 1 candle (WRONG).
+    // Now we estimate how many candles fit in `days` based on the interval.
+    const limit = Math.min(estimateCandleCount(days, interval), 1000); // Binance max 1000 per request
+
+    // For intraday intervals, also calculate the start time so Binance returns
+    // candles from the correct lookback window (not just the latest `limit` candles)
+    const now = Date.now();
+    const intervalMs = intervalToMs(interval);
+    const startMs = now - days * 86400_000;
+    const startParam = `&startTime=${now - limit * intervalMs}`;
 
     const data = await this.fetchFromBinance<BinanceKline[]>(
-      `/api/v3/klines?symbol=${pair}&interval=${binanceInterval}&limit=${limit}`
+      `/api/v3/klines?symbol=${pair}&interval=${binanceInterval}&limit=${limit}${startParam}`
     );
 
-    const candles: Candle[] = data.map((k) => ({
-      time: Math.floor(k[0] / 1000), // Open time in ms → seconds
-      open: parseFloat(k[1]),
-      high: parseFloat(k[2]),
-      low: parseFloat(k[3]),
-      close: parseFloat(k[4]),
-      volume: parseFloat(k[5]),
-    }));
+    const candles: Candle[] = data
+      .filter((k) => k[0] >= startMs) // Only include candles within the requested range
+      .map((k) => ({
+        time: Math.floor(k[0] / 1000), // Open time in ms → seconds
+        open: parseFloat(k[1]),
+        high: parseFloat(k[2]),
+        low: parseFloat(k[3]),
+        close: parseFloat(k[4]),
+        volume: parseFloat(k[5]),
+      }));
 
     return candles;
   }
