@@ -20,7 +20,7 @@ import { getBinanceWS, isWSCompatible } from '@/lib/data/binance-ws';
 import { getAlpacaWS } from '@/lib/data/alpaca-ws';
 import type { Candle } from '@/lib/types';
 import type { WSConnectionState, WSState } from '@/lib/data/binance-ws';
-import type { AlpacaWSConnectionState } from '@/lib/data/alpaca-ws';
+import type { AlpacaWSState } from '@/lib/data/alpaca-ws';
 
 interface UseRealtimeCandlesResult {
   /** Merged candles: historical + live updates */
@@ -185,32 +185,38 @@ export function useRealtimeCandles(
       return;
     }
 
+    // Subscribe to bar updates
     alpacaWS.subscribe(symbol, timeframe, (update) => {
       if (update.symbol !== symbolRef.current) {
         return;
       }
 
       setMergedCandles(prev => mergeLiveCandle(prev, update.candle));
-
-      // Update WS state from Alpaca
-      const alpacaState = alpacaWS.getState();
-      // Map Alpaca state to our WSConnectionState type
-      const mappedState: WSConnectionState = alpacaState === 'connected' ? 'connected' :
-        alpacaState === 'connecting' ? 'connecting' :
-        alpacaState === 'reconnecting' ? 'reconnecting' : 'disconnected';
-      setWsState(mappedState);
-      setWsProvider('alpaca');
     });
 
-    // Track connection state
-    const alpacaState = alpacaWS.getState();
-    const mappedState: WSConnectionState = alpacaState === 'connected' ? 'connected' :
-      alpacaState === 'connecting' ? 'connecting' :
-      alpacaState === 'reconnecting' ? 'reconnecting' : 'disconnected';
-    setWsState(mappedState);
+    // Track connection state via onStateChange callback
+    // This is critical — without it, wsState would never update because
+    // the bar callback only fires when data arrives (which depends on
+    // correct subscription format + successful connection).
+    const unsubState = alpacaWS.onStateChange((state: AlpacaWSState) => {
+      // Map Alpaca WS state to our shared WSConnectionState type
+      const mappedState: WSConnectionState = state.connectionState;
+      setWsState(mappedState);
+
+      // Calculate latency from last message time
+      if (state.lastMessageTime) {
+        setLatencyMs(Date.now() - state.lastMessageTime);
+      }
+
+      // Only set provider to 'alpaca' if connected or connecting
+      if (state.connectionState === 'connected' || state.connectionState === 'connecting' || state.connectionState === 'reconnecting') {
+        setWsProvider('alpaca');
+      }
+    });
 
     return () => {
       alpacaWS.unsubscribe();
+      unsubState();
       setWsProvider('none');
     };
   }, [symbol, timeframe]);

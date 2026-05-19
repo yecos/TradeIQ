@@ -6,6 +6,18 @@ El formato se basa en [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 
 ---
 
+## [0.23.1] - 2026-05-19
+
+### Corregido
+- **FIX**: Alpaca WS subscription format incorrecto — enviaba `bars: [{ symbol, timeframe }]` (array de objetos) cuando Alpaca espera `bars: ["AAPL"]` (array de strings). Esto causaba que NUNCA se recibieran actualizaciones de barras para stocks/ETFs via WebSocket (`src/lib/data/alpaca-ws.ts`)
+- **FIX**: Alpaca WS sin callback de estado — la clase `AlpacaWebSocket` no tenía método `onStateChange()` como `BinanceKlineWS`, por lo que el hook `useRealtimeCandles` nunca podía saber si la conexión WS estaba activa para stocks. Ahora implementa `onStateChange()` con `AlpacaWSState` interface y notificación automática de cambios de estado
+- **FIX**: Hook `useRealtimeCandles` no trackeaba estado Alpaca WS — solo actualizaba `wsState` dentro del callback de barras (que nunca se llamaba por el bug de suscripción). Ahora usa `onStateChange()` para trackear connection state, latency y wsProvider correctamente
+- **FIX**: Indicador "LIVE" nunca aparecía para stocks — como consecuencia de los bugs anteriores, el indicador de WebSocket en tiempo real nunca se mostraba para acciones/ETFs
+- **FIX**: `ALPACA_BAR_SIZES` eliminado — ya no se usa tras corregir el formato de suscripción (Alpaca envía barras 1Min por defecto en IEX free tier)
+- **FIX**: tsconfig.json excluía `mini-services` para evitar errores de build por dependencias faltantes
+
+---
+
 ## [0.23.0] - 2026-05-18
 
 ### Agregado

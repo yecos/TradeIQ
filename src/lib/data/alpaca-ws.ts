@@ -28,6 +28,16 @@ export interface AlpacaBarUpdate {
 
 export type AlpacaBarCallback = (update: AlpacaBarUpdate) => void;
 
+export interface AlpacaWSState {
+  connectionState: AlpacaWSConnectionState;
+  symbol: string | null;
+  timeframe: string | null;
+  reconnectAttempts: number;
+  lastMessageTime: number | null;
+}
+
+export type AlpacaStateCallback = (state: AlpacaWSState) => void;
+
 interface AlpacaWSBarMessage {
   T: 'b';           // Message type: bar
   S: string;         // Symbol
@@ -60,16 +70,6 @@ interface AlpacaWSQuoteMessage {
   t: string;         // Timestamp ISO string
 }
 
-// Alpaca timeframe → our format mapping
-const ALPACA_BAR_SIZES: Record<string, string> = {
-  '1m': '1Min',
-  '5m': '5Min',
-  '15m': '15Min',
-  '1H': '1Hour',
-  '4H': '4Hour',
-  '1D': '1Day',
-};
-
 const MAX_RECONNECT_ATTEMPTS = 10;
 const BASE_RECONNECT_DELAY = 1000;
 const MAX_RECONNECT_DELAY = 30000;
@@ -86,11 +86,13 @@ export class AlpacaWebSocket {
   private apiSecret: string;
   private isPaper: boolean;
   private barCallback: AlpacaBarCallback | null = null;
+  private stateChangeCallbacks: AlpacaStateCallback[] = [];
   private connectionState: AlpacaWSConnectionState = 'disconnected';
   private currentSymbol: string | null = null;
   private currentTimeframe: string | null = null;
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastMessageTime: number | null = null;
   private disposed = false;
 
   constructor(apiKey: string, apiSecret: string, isPaper: boolean = true) {
@@ -123,9 +125,35 @@ export class AlpacaWebSocket {
   }
 
   /**
-   * Get current connection state.
+   * Register a callback for connection state changes.
+   * Returns an unsubscribe function.
    */
-  getState(): AlpacaWSConnectionState {
+  onStateChange(callback: AlpacaStateCallback): () => void {
+    this.stateChangeCallbacks.push(callback);
+    // Immediately call with current state
+    callback(this.getState());
+    return () => {
+      this.stateChangeCallbacks = this.stateChangeCallbacks.filter(cb => cb !== callback);
+    };
+  }
+
+  /**
+   * Get current connection state and metadata.
+   */
+  getState(): AlpacaWSState {
+    return {
+      connectionState: this.connectionState,
+      symbol: this.currentSymbol,
+      timeframe: this.currentTimeframe,
+      reconnectAttempts: this.reconnectAttempts,
+      lastMessageTime: this.lastMessageTime,
+    };
+  }
+
+  /**
+   * Get just the connection state (for simple checks).
+   */
+  getConnectionState(): AlpacaWSConnectionState {
     return this.connectionState;
   }
 
@@ -216,12 +244,16 @@ export class AlpacaWebSocket {
       this.reconnectAttempts = 0;
 
       // Subscribe to bars for the current symbol
-      if (this.currentSymbol && this.currentTimeframe) {
-        const barSize = ALPACA_BAR_SIZES[this.currentTimeframe] || '1Min';
+      // Alpaca WS expects bar subscriptions as an array of symbol strings,
+      // NOT objects with symbol+timeframe. The timeframe is set by the
+      // bar type (1Min, 5Min, etc.) which Alpaca auto-selects based on the
+      // data feed. For IEX free tier, 1Min bars are the default.
+      if (this.currentSymbol) {
         this.ws?.send(JSON.stringify({
           action: 'subscribe',
-          bars: [{ symbol: this.currentSymbol, timeframe: barSize }],
+          bars: [this.currentSymbol],
         }));
+        console.log(`[TradeIQ AlpacaWS] Subscribed to bars for ${this.currentSymbol}`);
       }
       return;
     }
@@ -240,6 +272,8 @@ export class AlpacaWebSocket {
     if (msg.T === 'b' && this.barCallback && this.currentSymbol) {
       const barMsg = msg as unknown as AlpacaWSBarMessage;
       if (barMsg.S === this.currentSymbol) {
+        this.lastMessageTime = Date.now();
+
         const candle: Candle = {
           time: Math.floor(new Date(barMsg.t).getTime() / 1000),
           open: barMsg.o,
@@ -254,6 +288,16 @@ export class AlpacaWebSocket {
           timeframe: this.currentTimeframe || '1m',
           candle,
         });
+      }
+    }
+
+    // Handle trade updates — use for real-time price between bar updates
+    // This provides faster feedback than waiting for the next bar
+    if (msg.T === 't' && this.barCallback && this.currentSymbol) {
+      const tradeMsg = msg as unknown as AlpacaWSTradeMessage;
+      if (tradeMsg.S === this.currentSymbol && this.lastMessageTime) {
+        // Update last message time for latency tracking
+        this.lastMessageTime = Date.now();
       }
     }
 
@@ -314,6 +358,18 @@ export class AlpacaWebSocket {
   private setConnectionState(state: AlpacaWSConnectionState): void {
     if (this.connectionState === state) return;
     this.connectionState = state;
+    this.notifyStateChange();
+  }
+
+  private notifyStateChange(): void {
+    const state = this.getState();
+    for (const cb of this.stateChangeCallbacks) {
+      try {
+        cb(state);
+      } catch (error) {
+        console.warn('[TradeIQ AlpacaWS] State callback error:', error);
+      }
+    }
   }
 }
 
