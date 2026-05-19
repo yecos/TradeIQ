@@ -1,0 +1,1130 @@
+═══════════════════════════════════════════════════════════════════════════════
+                  GUÍA DETALLADA DE IMPLEMENTACIÓN - TradeIQ
+                        Roadmap 4 Fases Priorizado
+═══════════════════════════════════════════════════════════════════════════════
+
+RESUMEN EJECUTIVO
+─────────────────
+Este documento mapea las prioridades de desarrollo para convertir TradeIQ de un
+"generador de señales" a una "plataforma de aprendizaje de trading" con capacidad
+de validación y auditoría de estrategias.
+
+Stack actual: Next.js 16 + Prisma + SQLite + Polygon.io + Alpaca Markets
+
+
+═══════════════════════════════════════════════════════════════════════════════
+FASE 1: CIMIENTOS (Semanas 1-4)
+═══════════════════════════════════════════════════════════════════════════════
+
+OBJETIVO: Cerrar el ciclo completo señal → ejecución → resultado
+
+El problema actual: El usuario recibe una señal LONG/SHORT con SL y TP pero no
+hay forma de saber si realmente ejecutó la operación, si fue correcta o qué pasó
+después. La Bitácora existe pero está desconectada del motor de análisis.
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ TAREA 1.1: Integración Señal ↔ Bitácora                                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Prioridad: CRÍTICA                                                          │
+│ Tiempo estimado: 3-4 días                                                   │
+│                                                                             │
+│ DESCRIPCIÓN:                                                                │
+│ La Bitácora (journal) y el motor de análisis están actualmente              │
+│ desconectados. Necesitas vincularlos para crear un flujo completo.          │
+│                                                                             │
+│ IMPLEMENTACIÓN:                                                             │
+│                                                                             │
+│ 1. MODIFICAR SCHEMA DE PRISMA                                              │
+│    Archivo: prisma/schema.prisma                                           │
+│                                                                             │
+│    a) Agregar tabla Signal para almacenar historial:                       │
+│       model Signal {                                                        │
+│         id           String    @id @default(cuid())                        │
+│         symbol       String                                                 │
+│         timestamp    DateTime  @default(now())                             │
+│         direction    String    // "LONG" | "SHORT" | "NEUTRAL"            │
+│         entryPrice   Float                                                  │
+│         stopLoss     Float                                                  │
+│         takeProfit   Float                                                  │
+│         riskReward   Float                                                  │
+│         confluenceScore Float                                              │
+│         vectorScores Json      // { technical: 75, pattern: 80, ... }     │
+│         activeVectors String[] // vectores usados en el análisis          │
+│         analysisDetails Json   // detalles técnicos completos              │
+│                                                                             │
+│         // Vínculos con ejecución                                          │
+│         tradeId      String?   @unique                                     │
+│         trade        Trade?    @relation(fields: [tradeId], references: [id])│
+│       }                                                                     │
+│                                                                             │
+│    b) Extender tabla Trade con información de señal:                       │
+│       model Trade {                                                         │
+│         // ... campos existentes                                           │
+│         signal       Signal?                                               │
+│         executedPrice Float? // precio real de entrada vs señal           │
+│         priceDeviation Float? // diferencia %                              │
+│         actualPnL    Float?  // P&L real                                  │
+│         pnlPercent   Float?  // % de ganancia                              │
+│         signalAccuracy String? // "CORRECT" | "WRONG_DIRECTION"...        │
+│       }                                                                     │
+│                                                                             │
+│ 2. CREAR ENDPOINT POST /api/signals/execute                                │
+│    Archivo: src/app/api/signals/execute/route.ts                          │
+│                                                                             │
+│    Lógica:                                                                 │
+│    - Recibe un signalId                                                   │
+│    - Crea un Trade basado en la Signal                                    │
+│    - Integra con Alpaca para paper trading                                │
+│    - Vincula Signal → Trade automáticamente                               │
+│    - Retorna confirmation con tradeId y executedPrice                     │
+│                                                                             │
+│    Pseudocódigo:                                                           │
+│    ```                                                                     │
+│    POST /api/signals/execute                                              │
+│    Body: { signalId, executedPrice?, quantity? }                          │
+│                                                                             │
+│    1. Obtener Signal del DB                                               │
+│    2. Validar que aún es válida (no vieja > 1 hora)                       │
+│    3. Si ejecutedPrice no viene, usar entryPrice de Signal                │
+│    4. Crear Trade en DB con direction y SL/TP de Signal                   │
+│    5. Enviar orden a Alpaca (paper trading)                               │
+│    6. Guardar order_id de Alpaca                                          │
+│    7. Actualizar Signal.tradeId                                           │
+│    8. Retornar { tradeId, orderId, status, executedPrice }                │
+│    ```                                                                     │
+│                                                                             │
+│ 3. MODIFICAR COMPONENTE signal-card.tsx                                    │
+│    Archivo: src/components/trading/signal-card.tsx                         │
+│                                                                             │
+│    Agregar:                                                                │
+│    - Botón "Ejecutar" con confirmación                                    │
+│    - Validación: precio actual vs entryPrice (aviso si > 2% desviación)   │
+│    - Campos opcionales para ajustar quantity antes de ejecutar            │
+│    - Spinner mientras se procesa                                          │
+│    - Toast con resultado de ejecución                                     │
+│                                                                             │
+│ 4. CREAR ENDPOINT GET /api/signals/:id/status                             │
+│    Archivo: src/app/api/signals/[id]/status/route.ts                      │
+│                                                                             │
+│    Retorna:                                                                │
+│    - Signal original (dirección, entrada, SL, TP)                         │
+│    - Trade vinculado (si existe)                                          │
+│    - Estado actual: OPEN, CLOSED, AT_SL, AT_TP, ABANDONED                 │
+│    - P&L si está cerrado                                                  │
+│    - Comparativa: predicción vs realidad                                  │
+│                                                                             │
+│ TESTING:                                                                   │
+│ - Generar signal de prueba                                                │
+│ - Ejecutar con click en UI                                                │
+│ - Verificar que aparezca en Journal                                       │
+│ - Cerrar trade manualmente en Alpaca                                      │
+│ - Verificar que se registre P&L y sea calculado correctamente             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ TAREA 1.2: Historial de Señales y Análisis de Precisión                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Prioridad: ALTA                                                             │
+│ Tiempo estimado: 2-3 días                                                   │
+│                                                                             │
+│ DESCRIPCIÓN:                                                                │
+│ Crear un dashboard que muestre el historial de señales generadas           │
+│ y si fueron correctas o no. Esto convierte el motor en algo auditable.     │
+│                                                                             │
+│ IMPLEMENTACIÓN:                                                             │
+│                                                                             │
+│ 1. ENDPOINT GET /api/signals/history                                       │
+│    Archivo: src/app/api/signals/history/route.ts                          │
+│                                                                             │
+│    Query params:                                                           │
+│    - symbol: string (filter)                                              │
+│    - days: number (últimos N días, default 30)                            │
+│    - executed: boolean (solo señales ejecutadas?)                         │
+│                                                                             │
+│    Retorna array de Signals con:                                          │
+│    {                                                                       │
+│      id, symbol, timestamp, direction,                                    │
+│      entryPrice, stopLoss, takeProfit,                                    │
+│      confluenceScore, vectorScores,                                       │
+│      // Si tiene Trade vinculado:                                         │
+│      tradeId,                                                             │
+│      executed: boolean,                                                   │
+│      executedPrice, priceDeviation,                                       │
+│      outcome: "TP_HIT" | "SL_HIT" | "ABANDONED" | "OPEN",                │
+│      pnl, pnlPercent,                                                     │
+│      accuracy: "CORRECT" | "WRONG_DIR" | "PARTIAL"                       │
+│    }                                                                       │
+│                                                                             │
+│ 2. CREAR COMPONENTE signals-history-table.tsx                             │
+│    Archivo: src/components/trading/signals-history-table.tsx               │
+│                                                                             │
+│    Mostrar tabla con:                                                      │
+│    - Fecha/hora de señal                                                  │
+│    - Symbol                                                               │
+│    - Dirección (L/S con badge de color)                                  │
+│    - Confluencia (barra de progreso)                                      │
+│    - Ejecutada (sí/no)                                                    │
+│    - Resultado si ejecutada (✓ TP / ✗ SL / ? OPEN)                       │
+│    - P&L con color (verde/rojo)                                           │
+│    - % de acierto de cada vector (desplegar detalles)                    │
+│                                                                             │
+│ 3. CREAR PANEL stats-panel.tsx CON MÉTRICAS                               │
+│    Archivo: src/components/trading/stats-panel.tsx                         │
+│                                                                             │
+│    Mostrar:                                                                │
+│    - Total de señales generadas (período)                                 │
+│    - % ejecutadas                                                         │
+│    - % de acierto (CORRECT vs total ejecutadas)                          │
+│    - Confluencia promedio                                                 │
+│    - P&L total acumulado                                                  │
+│    - Win rate %                                                           │
+│    - Ganancia promedio / Pérdida promedio                                │
+│    - Factor de ganancia (profit / loss)                                   │
+│    - Max drawdown                                                         │
+│                                                                             │
+│ 4. LÓGICA DE CÁLCULO DE PRECISIÓN                                         │
+│                                                                             │
+│    Basado en predecir dirección:                                          │
+│    ┌─────────────────────────────────────────────────────────┐           │
+│    │ SIGNAL ACTUAL    │ RESULTADO                             │           │
+│    ├──────────────────┼──────────────────────────────────────┤           │
+│    │ LONG, TP hit     │ ✓ CORRECT (ganó dinero)              │           │
+│    │ LONG, SL hit     │ ✗ WRONG_DIR (perdió dinero)          │           │
+│    │ SHORT, TP hit    │ ✓ CORRECT                            │           │
+│    │ SHORT, SL hit    │ ✗ WRONG_DIR                          │           │
+│    │ Ejecutada, OPEN  │ ? PENDING (aún abierta)              │           │
+│    │ No ejecutada     │ ~ ABANDONED (nunca se ejecutó)       │           │
+│    └─────────────────────────────────────────────────────────┘           │
+│                                                                             │
+│ TESTING:                                                                   │
+│ - Generar 10+ señales de prueba en diferentes símbolos                    │
+│ - Ejecutar al menos 5 de ellas                                            │
+│ - Simular cierre en TP o SL (actualizar trade manually)                   │
+│ - Verificar que las métricas se calculen correctamente                    │
+│ - Validar que el accuracy sea correcto                                    │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ TAREA 1.3: Migración SQLite → PostgreSQL (Fix en progreso)                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Prioridad: MEDIA (ya en roadmap)                                            │
+│ Tiempo estimado: 2-3 días                                                   │
+│                                                                             │
+│ DESCRIPCIÓN:                                                                │
+│ SQLite no escala bien con muchas queries concurrentes. PostgreSQL es       │
+│ mucho más robusto para producción.                                         │
+│                                                                             │
+│ IMPLEMENTACIÓN:                                                             │
+│                                                                             │
+│ 1. CAMBIAR .env.local                                                      │
+│    DATABASE_URL=postgresql://user:password@localhost:5432/tradeiq         │
+│                                                                             │
+│ 2. EJECUTAR MIGRACIÓN                                                      │
+│    $ bun run prisma migrate deploy                                        │
+│                                                                             │
+│ 3. VERIFICAR DATOS                                                         │
+│    $ bun run prisma studio                                                │
+│                                                                             │
+│ Nota: Esto prepara el camino para la tabla signal_history que agregamos   │
+│       en 1.1                                                               │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+FASE 2: VALIDACIÓN Y CONFIABILIDAD (Semanas 5-10)
+═══════════════════════════════════════════════════════════════════════════════
+
+OBJETIVO: Validar que los vectores realmente funcionan. De "confía en mí" a 
+"mira la evidencia".
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ TAREA 2.1: Backtesting con Polygon.io                                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Prioridad: CRÍTICA                                                          │
+│ Tiempo estimado: 4-5 días                                                   │
+│                                                                             │
+│ DESCRIPCIÓN:                                                                │
+│ El backtesting es probablemente lo que más valor añade. Permite al         │
+│ usuario ver si su combinación de vectores hubiera funcionado en los        │
+│ últimos 6 meses usando datos históricos de Polygon.io.                    │
+│                                                                             │
+│ IMPLEMENTACIÓN:                                                             │
+│                                                                             │
+│ 1. CREAR MICRO-SERVICIO DE BACKTESTING                                    │
+│    Archivo: mini-services/backtest-engine.ts                              │
+│    Nota: Ya existe carpeta mini-services en el repo                       │
+│                                                                             │
+│    Funcionalidad:                                                          │
+│    - Recibe: symbol, timeframe, startDate, endDate, vectorConfig          │
+│    - Obtiene datos históricos de Polygon.io                               │
+│    - Corre el motor de confluencia en cada candle                         │
+│    - Registra todas las señales que se hubieran generado                  │
+│    - Calcula P&L de cada señal (asumiendo ejecución)                      │
+│    - Retorna: total trades, wins, losses, win rate, max drawdown          │
+│                                                                             │
+│    Pseudocódigo:                                                           │
+│    ```                                                                     │
+│    function backtestStrategy(                                             │
+│      symbol: string,                                                      │
+│      vectorConfig: VectorConfig,                                          │
+│      startDate: Date,                                                     │
+│      endDate: Date,                                                       │
+│      timeframe: "1min" | "5min" | "15min" | "1hour" | "1day"             │
+│    ) {                                                                    │
+│      // 1. Obtener candles históricos                                     │
+│      const candles = await polygon.getCandles(symbol, startDate, endDate)│
+│                                                                             │
+│      // 2. Iterar cada candle                                             │
+│      const signals = []                                                   │
+│      for (let i = 50; i < candles.length; i++) {                         │
+│        // Construir OHLCV array hasta este punto                          │
+│        const historicalData = candles.slice(0, i + 1)                    │
+│                                                                             │
+│        // 3. Correr análisis                                              │
+│        const analysis = runConfluenceEngine(                              │
+│          historicalData,                                                  │
+│          vectorConfig                                                     │
+│        )                                                                  │
+│                                                                             │
+│        // 4. Si hay señal, registrarla                                    │
+│        if (analysis.signal && analysis.confluenceScore > threshold) {     │
+│          signals.push({                                                   │
+│            timestamp: candles[i].timestamp,                               │
+│            direction: analysis.direction,                                 │
+│            entryPrice: candles[i].close,                                  │
+│            // ... resto de datos                                          │
+│          })                                                               │
+│        }                                                                  │
+│      }                                                                    │
+│                                                                             │
+│      // 5. Calcular resultados                                            │
+│      const results = calculateBacktestMetrics(signals, candles)          │
+│      return results                                                       │
+│    }                                                                      │
+│    ```                                                                     │
+│                                                                             │
+│ 2. ENDPOINT POST /api/backtest                                            │
+│    Archivo: src/app/api/backtest/route.ts                                 │
+│                                                                             │
+│    Body:                                                                   │
+│    {                                                                       │
+│      symbol: "AAPL",                                                      │
+│      timeframe: "1day",                                                   │
+│      startDate: "2023-06-01",                                             │
+│      endDate: "2024-06-01",                                               │
+│      vectorConfig: {                                                      │
+│        technical: true,                                                   │
+│        patterns: true,                                                    │
+│        volume: true,                                                      │
+│        sentiment: false,                                                  │
+│        macro: false,                                                      │
+│        news: false                                                        │
+│      },                                                                   │
+│      confluenceThreshold: 70                                              │
+│    }                                                                       │
+│                                                                             │
+│    Respuesta:                                                              │
+│    {                                                                       │
+│      symbol, timeframe, period,                                           │
+│      totalSignals: number,                                                │
+│      totalTrades: number,  // asumiendo ejecución en cada señal           │
+│      wins: number,                                                        │
+│      losses: number,                                                      │
+│      winRate: number (0-100),                                             │
+│      profit: number,                                                      │
+│      loss: number,                                                        │
+│      netProfit: number,                                                   │
+│      profitFactor: number,        // profit / loss                        │
+│      avgWin: number,                                                      │
+│      avgLoss: number,                                                     │
+│      maxDrawdown: number,                                                 │
+│      sharpeRatio: number,                                                 │
+│      signalList: [{                                                       │
+│        timestamp, direction, entryPrice,                                  │
+│        outcome: "TP" | "SL", pnl, pnlPercent                              │
+│      }]                                                                    │
+│    }                                                                       │
+│                                                                             │
+│    IMPORTANTE: Este endpoint puede tardar mucho (30+ segundos para         │
+│    6 meses diarios). Implementar:                                         │
+│    - Queue (Bull o Bullmq) para procesamiento async                      │
+│    - WebSocket para actualizar progreso                                   │
+│    - Guardar resultados en DB para no recalcular                         │
+│                                                                             │
+│ 3. CREAR TABLA BacktestResult EN PRISMA                                   │
+│                                                                             │
+│    model BacktestResult {                                                 │
+│      id           String    @id @default(cuid())                         │
+│      createdAt    DateTime  @default(now())                              │
+│      symbol       String                                                  │
+│      timeframe    String                                                  │
+│      startDate    DateTime                                                │
+│      endDate      DateTime                                                │
+│      vectorConfig Json                                                    │
+│      threshold    Int       @default(70)                                  │
+│      totalSignals Int                                                      │
+│      totalTrades  Int                                                      │
+│      wins         Int                                                      │
+│      losses       Int                                                      │
+│      winRate      Float                                                    │
+│      profitFactor Float                                                    │
+│      maxDrawdown  Float                                                    │
+│      netProfit    Float                                                    │
+│      signalDetails Json    // array de signals con outcomes               │
+│    }                                                                       │
+│                                                                             │
+│ 4. CREAR COMPONENTE backtest-panel.tsx                                     │
+│    Archivo: src/components/trading/backtest-panel.tsx                      │
+│                                                                             │
+│    Mostrar:                                                                │
+│    - Inputs: symbol, timeframe, date range, vector selection              │
+│    - Botón "Ejecutar Backtest" con progreso                               │
+│    - Resultados en tarjetas (Win Rate, Profit Factor, Drawdown)          │
+│    - Gráfico de equity curve (crecimiento/decrecimiento del capital)      │
+│    - Tabla de trades (señales que se hubieran ejecutado)                 │
+│    - Opción de guardar/exportar resultados                               │
+│                                                                             │
+│ TESTING:                                                                   │
+│ - Hacer backtest de AAPL 1day último 6 meses con técnicos+patrones       │
+│ - Verificar que número de trades es razonable                             │
+│ - Compara manualmente un trade: entrada, SL, TP, resultado                │
+│ - Ejecutar backtest nuevamente, debe estar en caché (muy rápido)         │
+│ - Cambiar 1 vector, debe recalcular (no usar caché)                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ TAREA 2.2: Multi-Timeframe Analysis                                        │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Prioridad: ALTA                                                             │
+│ Tiempo estimado: 3-4 días                                                   │
+│                                                                             │
+│ DESCRIPCIÓN:                                                                │
+│ Los traders profesionales SIEMPRE confirman señales en al menos dos        │
+│ timeframes (ej. tendencia en 1D, entrada en 1H). El motor de confluencia   │
+│ ya tiene estructura para esto, solo hay que correrlo en paralelo.          │
+│                                                                             │
+│ IMPLEMENTACIÓN:                                                             │
+│                                                                             │
+│ 1. ENDPOINT POST /api/analyze/multi-timeframe                             │
+│    Archivo: src/app/api/analyze/multi-timeframe/route.ts                  │
+│                                                                             │
+│    Body:                                                                   │
+│    {                                                                       │
+│      symbol: "AAPL",                                                      │
+│      timeframes: ["1day", "1hour", "5min"],  // 3 niveles                 │
+│      vectorConfig: { technical: true, ... }                               │
+│    }                                                                       │
+│                                                                             │
+│    Lógica:                                                                 │
+│    - Obtener datos de cada timeframe en paralelo (Promise.all)           │
+│    - Correr confluenceEngine para cada uno                                │
+│    - Combinar scores: si 2+ timeframes dicen LONG, es LONG más fuerte    │
+│    - Retornar análisis de todos los timeframes + combinado                │
+│                                                                             │
+│    Respuesta:                                                              │
+│    {                                                                       │
+│      symbol, timestamp,                                                   │
+│      by_timeframe: [                                                      │
+│        {                                                                   │
+│          timeframe: "1day",                                               │
+│          direction: "LONG",                                               │
+│          confluenceScore: 85,                                             │
+│          entry, sl, tp, vectorScores                                      │
+│        },                                                                  │
+│        {                                                                   │
+│          timeframe: "1hour",                                              │
+│          direction: "LONG",                                               │
+│          confluenceScore: 72,                                             │
+│          entry, sl, tp, vectorScores                                      │
+│        },                                                                  │
+│        {                                                                   │
+│          timeframe: "5min",                                               │
+│          direction: "NEUTRAL",                                            │
+│          confluenceScore: 55,                                             │
+│          ...                                                              │
+│        }                                                                   │
+│      ],                                                                    │
+│      combined: {                                                          │
+│        direction: "LONG",  // 2 de 3 timeframes = LONG                   │
+│        confluenceScore: 79, // promedio ponderado                         │
+│        confidence: "ALTA", // 2+ timeframes de acuerdo                   │
+│        recommendation: "Señal confiable - confirma en 1D y 1H"           │
+│      }                                                                     │
+│    }                                                                       │
+│                                                                             │
+│ 2. ACTUALIZAR COMPONENTE analysis-panel.tsx                                │
+│    Mostrar:                                                                │
+│    - Tabs para cada timeframe (1D, 1H, 5M)                                │
+│    - Scores de confluencia comparados                                     │
+│    - Indicadores técnicos en cada uno (sus RSI, MACD, etc.)              │
+│    - Badge de "Confirmación" si 2+ están de acuerdo                      │
+│    - Recomendación: "Señal muy confiable" si todo coincide               │
+│                                                                             │
+│ 3. ACTUALIZAR CONFLUENCEENGINE PARA INCLUIR TIMEFRAME                     │
+│    Archivo: src/lib/confluence-engine.ts                                   │
+│                                                                             │
+│    Agregar parámetro timeframe a la lógica, para ajustar:                 │
+│    - Períodos de indicadores (RSI(14) para 5m vs RSI(14) para 1d)        │
+│    - Sensibilidad de detección                                            │
+│    - Umbrales de confluencia                                              │
+│                                                                             │
+│ TESTING:                                                                   │
+│ - Analizar AAPL en 1D, 1H, 5M simultáneamente                            │
+│ - Validar que las direcciones tenga sentido (ej, 1D LONG, 5M SHORT)      │
+│ - Verificar que "combined" score sea promedio razonable                   │
+│ - Backtestear con multi-timeframe vs single, comparar win rates           │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ TAREA 2.3: Alertas en Segundo Plano (Mini-servicio)                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Prioridad: MEDIA                                                            │
+│ Tiempo estimado: 2-3 días                                                   │
+│                                                                             │
+│ DESCRIPCIÓN:                                                                │
+│ Cambiar paradigma de "activo" (usuario abre app y hace clic) a "pasivo"   │
+│ (app monitorea en background y notifica). Usar mini-servicio que:         │
+│ - Monitorea watchlist periódicamente                                      │
+│ - Corre análisis cada X minutos                                           │
+│ - Notifica por email/Telegram cuando confluencia > umbral                 │
+│                                                                             │
+│ IMPLEMENTACIÓN:                                                             │
+│                                                                             │
+│ 1. CREAR MINI-SERVICIO DE MONITOREO                                       │
+│    Archivo: mini-services/alert-monitor.ts                                │
+│                                                                             │
+│    Pseudocódigo:                                                          │
+│    ```                                                                     │
+│    async function monitorWatchlist() {                                    │
+│      // 1. Obtener todos los usuarios con alertas habilitadas             │
+│      const users = await db.user.findMany({                              │
+│        where: { alertsEnabled: true }                                     │
+│      })                                                                   │
+│                                                                             │
+│      for (const user of users) {                                          │
+│        // 2. Obtener watchlist del usuario                               │
+│        const watchlist = user.watchlist                                   │
+│        const threshold = user.alertThreshold || 70  // 70% confluencia    │
+│                                                                             │
+│        // 3. Para cada símbolo en watchlist                               │
+│        for (const symbol of watchlist) {                                  │
+│          // 4. Correr análisis                                            │
+│          const analysis = await runConfluenceEngine(symbol, user.vectors) │
+│                                                                             │
+│          // 5. Comparar con última alerta (evitar spam)                   │
+│          const lastAlert = await db.alert.findFirst({                     │
+│            where: { userId: user.id, symbol },                            │
+│            orderBy: { createdAt: 'desc' }                                │
+│          })                                                               │
+│          const timeSinceLastAlert = now() - lastAlert?.createdAt || 0    │
+│                                                                             │
+│          // 6. Si confluencia > threshold Y pasaron > 4 horas             │
+│          if (analysis.confluenceScore > threshold &&                      │
+│              timeSinceLastAlert > 4 * 60 * 60 * 1000) {                  │
+│            // 7. Enviar notificación                                      │
+│            await sendAlert({                                             │
+│              userId: user.id,                                             │
+│              symbol,                                                      │
+│              direction: analysis.direction,                               │
+│              confluenceScore: analysis.confluenceScore,                   │
+│              entryPrice: analysis.entry,                                  │
+│              // Enviar por email Y Telegram (según preferencia)            │
+│            })                                                             │
+│                                                                             │
+│            // 8. Registrar alerta enviada                                 │
+│            await db.alert.create({                                        │
+│              userId: user.id, symbol, confluenceScore, direction          │
+│            })                                                             │
+│          }                                                               │
+│        }                                                                  │
+│      }                                                                    │
+│    }                                                                      │
+│                                                                             │
+│    // Ejecutar cada 5 minutos                                             │
+│    schedule.scheduleJob('*/5 * * * *', monitorWatchlist)                 │
+│    ```                                                                     │
+│                                                                             │
+│ 2. TABLAS DE BASE DE DATOS                                                │
+│                                                                             │
+│    model Alert {                                                          │
+│      id            String    @id @default(cuid())                        │
+│      createdAt     DateTime  @default(now())                             │
+│      userId        String                                                │
+│      user          User      @relation(fields: [userId], references: [id])│
+│      symbol        String                                                │
+│      confluenceScore Float                                                │
+│      direction     String                                                │
+│      entryPrice    Float                                                  │
+│      message       String    // "LONG en AAPL con 85% confluencia"        │
+│      sentVia       String[]  // ["EMAIL", "TELEGRAM"]                    │
+│      status        String    // "SENT", "FAILED"                         │
+│    }                                                                       │
+│                                                                             │
+│    Actualizar User:                                                       │
+│    model User {                                                           │
+│      // ... campos existentes                                            │
+│      alertsEnabled      Boolean @default(false)                          │
+│      alertThreshold     Int     @default(70) // % de confluencia          │
+│      alertEmail         String?                                          │
+│      alertTelegramId    String?                                          │
+│      alertFrequency     Int     @default(300) // segundos entre alertas   │
+│      alerts             Alert[]                                          │
+│    }                                                                       │
+│                                                                             │
+│ 3. INTEGRACIONES DE NOTIFICACIÓN                                          │
+│                                                                             │
+│    a) Email (usar Resend o SendGrid):                                    │
+│       ```                                                                 │
+│       import { Resend } from 'resend'                                    │
+│                                                                             │
+│       const resend = new Resend(process.env.RESEND_API_KEY)              │
+│       await resend.emails.send({                                         │
+│         from: 'alerts@tradeiq.app',                                      │
+│         to: user.alertEmail,                                             │
+│         subject: `TradeIQ Alert: ${direction} en ${symbol}`,             │
+│         html: `<h2>${direction} Signal</h2>...`                         │
+│       })                                                                 │
+│       ```                                                                 │
+│                                                                             │
+│    b) Telegram (más directo para traders):                               │
+│       ```                                                                 │
+│       const TelegramBot = require('node-telegram-bot-api')               │
+│       const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN)        │
+│       await bot.sendMessage(user.alertTelegramId,                        │
+│         `🚨 *${direction}* en *${symbol}*\n` +                          │
+│         `Confluencia: ${confluenceScore}%\n` +                          │
+│         `Entrada: $${entryPrice}`                                        │
+│       )                                                                   │
+│       ```                                                                 │
+│                                                                             │
+│ 4. ENDPOINT PARA CONFIGURAR ALERTAS                                       │
+│    POST /api/alerts/configure                                             │
+│    Body:                                                                   │
+│    {                                                                       │
+│      enabled: true,                                                       │
+│      threshold: 75,                                                       │
+│      frequency: 300, // segundos                                          │
+│      channels: ["EMAIL", "TELEGRAM"],                                     │
+│      email: "user@example.com",                                           │
+│      telegramId: "123456789"                                              │
+│    }                                                                       │
+│                                                                             │
+│ TESTING:                                                                   │
+│ - Habilitar alertas en Settings                                          │
+│ - Esperar a que el cron (cada 5 min) ejecute monitorWatchlist           │
+│ - Debería recibir Telegram/Email con señal LONG/SHORT cuando confluencia│
+│   supere 70% (o lo que configure)                                        │
+│ - Verificar que no spam (espera 4 horas antes de alertar otra vez)       │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+FASE 3: DIFERENCIACIÓN (Semanas 11-16)
+═══════════════════════════════════════════════════════════════════════════════
+
+OBJETIVO: Separar TradeIQ de cualquier screener técnico clásico. Agregar AI,
+análisis educativo y features profesionales.
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ TAREA 3.1: Noticias Reales + IA para Sentimiento                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Prioridad: ALTA                                                             │
+│ Tiempo estimado: 3-4 días                                                   │
+│                                                                             │
+│ DESCRIPCIÓN:                                                                │
+│ El vector de noticias es actualmente simulado. Reemplazarlo con análisis   │
+│ REAL usando API de noticias + IA es el diferenciador más importante.      │
+│ Ya tienes z-ai-web-dev-sdk en stack, usarlo para sentiment analysis.      │
+│                                                                             │
+│ IMPLEMENTACIÓN:                                                             │
+│                                                                             │
+│ 1. OBTENER NOTICIAS REALES                                                 │
+│    Opciones (ya en tu stack):                                              │
+│    - Polygon.io Ticker News API (ya tienes clave)                          │
+│    - Alpaca Markets News API (ya tienes credenciales)                      │
+│    - NewsAPI.org (gratis para desarrollo)                                  │
+│                                                                             │
+│    Archivo: src/lib/news-fetcher.ts                                        │
+│                                                                             │
+│    ```                                                                     │
+│    import { PolygonClient } from '@polygon.io/client-js'                  │
+│                                                                             │
+│    async function fetchRecentNews(symbol: string, limit = 10) {           │
+│      const client = new PolygonClient({                                   │
+│        apiKey: process.env.POLYGON_API_KEY                                │
+│      })                                                                    │
+│                                                                             │
+│      const news = await client.reference.tickerNews({                     │
+│        ticker: symbol,                                                    │
+│        limit,                                                             │
+│        order: 'desc',                                                     │
+│        sort: 'published_utc'                                              │
+│      })                                                                    │
+│                                                                             │
+│      return news.results.map(item => ({                                   │
+│        title: item.title,                                                 │
+│        description: item.description,                                     │
+│        publishedAt: item.published_utc,                                   │
+│        url: item.article_url,                                             │
+│        image: item.image_url,                                             │
+│        source: item.publisher?.name || 'Unknown'                          │
+│      }))                                                                   │
+│    }                                                                       │
+│    ```                                                                     │
+│                                                                             │
+│ 2. ANÁLISIS DE SENTIMIENTO CON CLAUDE API                                  │
+│    Ya tienes z-ai-web-dev-sdk, pero para este caso usar claude API       │
+│    directamente es mejor:                                                 │
+│                                                                             │
+│    Archivo: src/lib/sentiment-analyzer.ts                                  │
+│                                                                             │
+│    ```                                                                     │
+│    import Anthropic from '@anthropic-ai/sdk'                              │
+│                                                                             │
+│    const client = new Anthropic({                                         │
+│      apiKey: process.env.ANTHROPIC_API_KEY                                │
+│    })                                                                      │
+│                                                                             │
+│    async function analyzeSentiment(news: NewsItem[]) {                    │
+│      if (news.length === 0) return null                                   │
+│                                                                             │
+│      const newsText = news.map(n =>                                       │
+│        `[${n.publishedAt}] ${n.title} - ${n.description}`                │
+│      ).join('\n\n')                                                       │
+│                                                                             │
+│      const message = await client.messages.create({                       │
+│        model: 'claude-3-5-sonnet-20241022',                               │
+│        max_tokens: 500,                                                   │
+│        messages: [{                                                       │
+│          role: 'user',                                                    │
+│          content: `Analiza el sentimiento del mercado respecto a estas    │
+│          noticias sobre una acción. Responde ÚNICAMENTE en JSON:          │
+│          {                                                                │
+│            "overall_sentiment": "BULLISH" | "BEARISH" | "NEUTRAL",       │
+│            "sentiment_score": -100 a +100,                               │
+│            "confidence": 0 a 100,                                         │
+│            "key_drivers": ["driver1", "driver2"],                         │
+│            "short_analysis": "1-2 líneas"                                │
+│          }                                                                │
+│          \n\nNoticias:\n${newsText}`                                      │
+│        }]                                                                 │
+│      })                                                                   │
+│                                                                             │
+│      const result = JSON.parse(message.content[0].type === 'text' ?       │
+│        message.content[0].text : '{}')                                    │
+│      return result                                                        │
+│    }                                                                       │
+│    ```                                                                     │
+│                                                                             │
+│ 3. VECTOR DE NOTICIAS REEMPLAZADO                                         │
+│    Archivo: src/lib/vector-definitions.ts                                  │
+│                                                                             │
+│    Actualizar newsVector:                                                 │
+│    - En lugar de simulado, llamar a fetchRecentNews + analyzeSentiment   │
+│    - Mapear BULLISH → score +80 a +100                                   │
+│    - Mapear BEARISH → score -80 a -100                                   │
+│    - Mapear NEUTRAL → score 40-60                                        │
+│    - Integrar confidence del análisis                                     │
+│                                                                             │
+│ 4. ENDPOINT GET /api/analyze/news/:symbol                                  │
+│    Archivo: src/app/api/analyze/news/[symbol]/route.ts                    │
+│                                                                             │
+│    Respuesta:                                                              │
+│    {                                                                       │
+│      symbol,                                                              │
+│      timestamp,                                                           │
+│      recentNews: [{                                                       │
+│        title, description, publishedAt, url, image, source                │
+│      }],                                                                   │
+│      sentiment: {                                                         │
+│        overall_sentiment: "BULLISH",                                      │
+│        sentiment_score: 75,                                               │
+│        confidence: 85,                                                    │
+│        key_drivers: ["earnings beat", "new product"]                      │
+│        analysis: "Sentimiento positivo..."                                │
+│      },                                                                    │
+│      newsVectorScore: 82  // como score para confluencia                  │
+│    }                                                                       │
+│                                                                             │
+│ 5. UI: news-panel.tsx                                                      │
+│    Mostrar:                                                                │
+│    - Últimas 5 noticias con thumbnails                                   │
+│    - Sentiment badge: BULLISH (verde) / BEARISH (rojo) / NEUTRAL (gris)  │
+│    - Sentiment score visual (barra -100 a +100)                          │
+│    - Key drivers listados                                                │
+│    - Link a artículos completos                                          │
+│                                                                             │
+│ TESTING:                                                                   │
+│ - Analizar NVIDIA                                                        │
+│ - Debería traer noticias recientes reales                                │
+│ - El sentimiento debería tener sentido (si hay noticias de ganancias,    │
+│   debería ser BULLISH)                                                    │
+│ - Verificar que el score se integre a la confluencia correctamente       │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ TAREA 3.2: Strategy Comparison (A/B testing de estrategias)               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Prioridad: MEDIA                                                            │
+│ Tiempo estimado: 2-3 días                                                   │
+│                                                                             │
+│ DESCRIPCIÓN:                                                                │
+│ Feature educativa potente: usuario define "estrategia A" y "estrategia B"  │
+│ (diferentes combinaciones de vectores), las corre en backtest, ve cuál     │
+│ hubiera funcionado mejor. Convierte TradeIQ en herramienta de aprendizaje. │
+│                                                                             │
+│ IMPLEMENTACIÓN:                                                             │
+│                                                                             │
+│ 1. TABLA DE ESTRATEGIAS EN DB                                              │
+│                                                                             │
+│    model Strategy {                                                        │
+│      id              String    @id @default(cuid())                       │
+│      name            String    // "Técnico + Volumen"                     │
+│      description     String?                                              │
+│      userId          String                                               │
+│      createdAt       DateTime  @default(now())                            │
+│      vectorConfig    Json      // { technical: true, pattern: true, ... } │
+│      confluenceThreshold Int   @default(70)                               │
+│                                                                             │
+│      backtestedOn    BacktestResult[]                                     │
+│    }                                                                       │
+│                                                                             │
+│ 2. ENDPOINT POST /api/strategies/compare                                   │
+│    Archivo: src/app/api/strategies/compare/route.ts                        │
+│                                                                             │
+│    Body:                                                                   │
+│    {                                                                       │
+│      symbol: "AAPL",                                                      │
+│      timeframe: "1day",                                                   │
+│      period: { startDate: "2023-06-01", endDate: "2024-06-01" },        │
+│      strategies: [                                                        │
+│        {                                                                  │
+│          id: "strat-a",                                                  │
+│          name: "Técnico + Volumen",                                      │
+│          vectorConfig: { technical: true, volume: true, ... }            │
+│        },                                                                │
+│        {                                                                  │
+│          id: "strat-b",                                                  │
+│          name: "Técnico + Patrones",                                     │
+│          vectorConfig: { technical: true, patterns: true, ... }          │
+│        }                                                                  │
+│      ]                                                                    │
+│    }                                                                       │
+│                                                                             │
+│    Lógica:                                                                 │
+│    - Ejecutar backtest en paralelo para ambas estrategias                │
+│    - Compararlas lado a lado                                             │
+│                                                                             │
+│    Respuesta:                                                              │
+│    {                                                                       │
+│      comparison: {                                                        │
+│        strat_a: {                                                         │
+│          name, totalTrades, winRate, profitFactor,                        │
+│          netProfit, maxDrawdown, sharpeRatio                              │
+│        },                                                                 │
+│        strat_b: { ... },                                                 │
+│        winner: {                                                          │
+│          id: "strat-a",                                                  │
+│          metric: "profitFactor", // métrica en la que gana                │
+│          diff: "+0.85" // mejora numérica                                 │
+│        }                                                                  │
+│      },                                                                    │
+│      details: [                                                           │
+│        {                                                                  │
+│          // Cada trade en ambas estrategias                              │
+│          timestamp,                                                      │
+│          symbol,                                                         │
+│          strat_a: { direction, entry, outcome, pnl },                    │
+│          strat_b: { direction, entry, outcome, pnl }                     │
+│        }                                                                  │
+│      ]                                                                    │
+│    }                                                                       │
+│                                                                             │
+│ 3. COMPONENTE strategy-comparison.tsx                                      │
+│    Archivo: src/components/trading/strategy-comparison.tsx                 │
+│                                                                             │
+│    Layout lado-a-lado:                                                    │
+│    ┌──────────────────────────┬──────────────────────────┐               │
+│    │    ESTRATEGIA A          │    ESTRATEGIA B          │               │
+│    ├──────────────────────────┼──────────────────────────┤               │
+│    │ Técnico + Volumen        │ Técnico + Patrones       │               │
+│    │                          │                          │               │
+│    │ Trades: 45  ✓            │ Trades: 38  ✗            │               │
+│    │ Win Rate: 62%  ✓         │ Win Rate: 55%  ✗         │               │
+│    │ Profit: $5,420  ✓        │ Profit: $3,200  ✗        │               │
+│    │ Drawdown: -8.5%  ✗       │ Drawdown: -12.2%  ✓      │               │
+│    │                          │                          │               │
+│    │ [Gráficos]               │ [Gráficos]               │               │
+│    └──────────────────────────┴──────────────────────────┘               │
+│                                                                             │
+│    Mostrar:                                                                │
+│    - Tarjetas con KPIs principales                                       │
+│    - Checkmark (✓) o X (✗) mostrando ganador en cada métrica            │
+│    - Equity curves superpuestas para comparar trayectoria                 │
+│    - Tabla de trades lado a lado                                         │
+│    - Conclusión: "Estrategia A es mejor en ganancias (62% vs 55%)"      │
+│                                                                             │
+│ 4. GUARDAR ESTRATEGIAS                                                     │
+│    POST /api/strategies/create                                            │
+│    Body: { name, description, vectorConfig }                              │
+│                                                                             │
+│ TESTING:                                                                   │
+│ - Crear 2 estrategias diferentes                                          │
+│ - Compararlas en AAPL 1day último 6 meses                                 │
+│ - Verificar que los números tienen sentido                                │
+│ - Guardar mejores estrategias para reutilizar                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ TAREA 3.3: Paper Trading Integrado y P&L Tracking                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Prioridad: ALTA                                                             │
+│ Tiempo estimado: 3-4 días                                                   │
+│                                                                             │
+│ DESCRIPCIÓN:                                                                │
+│ Ya tienes Alpaca para paper trading, pero hay que integrar P&L tracking   │
+│ para que el usuario pueda ver sus resultados objetivamente.                │
+│                                                                             │
+│ IMPLEMENTACIÓN:                                                             │
+│                                                                             │
+│ 1. SINCRONIZAR TRADES CON ALPACA                                          │
+│    Archivo: src/lib/alpaca-sync.ts                                        │
+│                                                                             │
+│    Crear función que:                                                      │
+│    - Obtiene órdenes cerradas de Alpaca                                  │
+│    - Las sincroniza con la BD local                                       │
+│    - Calcula P&L real                                                     │
+│    - Ejecutar cada 5 minutos                                              │
+│                                                                             │
+│    ```                                                                     │
+│    import Alpaca from '@alpacahq/alpaca-trade-api'                       │
+│                                                                             │
+│    async function syncTrades() {                                          │
+│      const alpaca = new Alpaca({                                          │
+│        apiKey: process.env.ALPACA_API_KEY,                                │
+│        secret: process.env.ALPACA_API_SECRET                              │
+│      })                                                                    │
+│                                                                             │
+│      // Obtener órdenes cerradas                                         │
+│      const closedOrders = await alpaca.getOrders({                       │
+│        status: 'closed',                                                  │
+│        limit: 100,                                                        │
+│        nested: true                                                       │
+│      })                                                                    │
+│                                                                             │
+│      for (const order of closedOrders) {                                  │
+│        // Buscar si ya existe en nuestra BD                              │
+│        const existing = await db.trade.findUnique({                      │
+│          where: { alpacaOrderId: order.id }                              │
+│        })                                                                 │
+│                                                                             │
+│        if (existing) continue // Ya fue procesado                         │
+│                                                                             │
+│        // Calcular P&L                                                    │
+│        const entryPrice = order.filled_avg_price                         │
+│        const exitPrice = order.filled_avg_price // si fue cerrada        │
+│        const quantity = order.filled_qty                                  │
+│        const pnl = (exitPrice - entryPrice) * quantity                   │
+│        const pnlPercent = ((exitPrice - entryPrice) / entryPrice) * 100  │
+│                                                                             │
+│        // Crear en BD                                                    │
+│        await db.trade.create({                                           │
+│          data: {                                                         │
+│            symbol: order.symbol,                                         │
+│            direction: order.side === 'buy' ? 'LONG' : 'SHORT',          │
+│            entryPrice,                                                   │
+│            exitPrice,                                                    │
+│            quantity,                                                     │
+│            pnl,                                                          │
+│            pnlPercent,                                                   │
+│            alpacaOrderId: order.id,                                      │
+│            status: 'CLOSED',                                             │
+│            closedAt: new Date(order.filled_at)                           │
+│          }                                                               │
+│        })                                                               │
+│      }                                                                   │
+│    }                                                                      │
+│                                                                             │
+│    // Ejecutar cada 5 minutos                                            │
+│    schedule.scheduleJob('*/5 * * * *', syncTrades)                       │
+│    ```                                                                     │
+│                                                                             │
+│ 2. DASHBOARD DE P&L                                                        │
+│    Crear componente: pnl-dashboard.tsx                                     │
+│    Mostrar:                                                                │
+│    - P&L total acumulado (grande, destacado)                             │
+│    - % de ganancias vs pérdidas                                          │
+│    - Racha actual (winning/losing streak)                                │
+│    - Mejor trade (máxima ganancia)                                       │
+│    - Peor trade (máxima pérdida)                                         │
+│    - Gráfico de equity curve (crecimiento total del capital)             │
+│    - Tabla de trades últimos 10 con P&L de cada uno                     │
+│                                                                             │
+│ 3. JOURNAL AUTOMÁTICO                                                      │
+│    Cuando un trade se cierra:                                             │
+│    - Crear entrada automática en Journal                                 │
+│    - Incluir: dirección, precio, P&L, outcome                            │
+│    - Permitir usuario agregar notas/comentarios post-trade               │
+│    - Vincular con Signal si fue basada en TradeIQ                       │
+│                                                                             │
+│ TESTING:                                                                   │
+│ - Crear manualmente algunos paper trades en Alpaca                       │
+│ - Esperar a que el cron sincronice (5 min)                               │
+│ - Verificar que aparezcan en Dashboard con P&L correcto                  │
+│ - Cerrar un trade, verificar que se actualice equity curve              │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+FASE 4: PLATAFORMA (Semanas 17+) - OPCIONAL
+═══════════════════════════════════════════════════════════════════════════════
+
+Solo implementar si quieres monetizar o convertir en plataforma multi-usuario.
+Si es solo para ti, puedes saltarte esta fase.
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ TAREA 4.1: Marketplace de Estrategias (Multi-usuario)                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Prioridad: BAJA (solo para plataforma)                                      │
+│ Tiempo estimado: 4-5 días                                                   │
+│                                                                             │
+│ DESCRIPCIÓN:                                                                │
+│ Los usuarios crean combinaciones de vectores, las publican con su           │
+│ historial de backtesting, otros pueden copiarlas.                          │
+│                                                                             │
+│ IMPLEMENTACIÓN:                                                             │
+│ - Crear tabla Strategy con owner, visibility (PRIVATE/PUBLIC)             │
+│ - Endpoint POST /api/marketplace/strategies para publicar                 │
+│ - Endpoint GET /api/marketplace/strategies para listar públicas           │
+│ - Fork strategy: copiar config de otra estrategia                        │
+│ - Rating y comentarios en estrategias populares                          │
+│                                                                             │
+│ NO DETALLO AQUÍ porque solo es necesario si quieres multi-usuario.       │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+TIMELINE RECOMENDADO
+═══════════════════════════════════════════════════════════════════════════════
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ SEMANA 1-4: FASE 1 - Cierre de ciclo                                       │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Día 1-2:   1.1 Integración Señal ↔ Bitácora                               │
+│ Día 3-4:   1.2 Historial y métricas de precisión                          │
+│ Día 5-7:   1.3 Migración SQLite → PostgreSQL                              │
+│ Resultado: Usuario puede ejecutar señales y ver si fueron correctas       │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ SEMANA 5-10: FASE 2 - Validación                                           │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Día 1-5:   2.1 Backtesting (feature más importante)                       │
+│ Día 6-8:   2.2 Multi-timeframe                                            │
+│ Día 9-10:  2.3 Alertas en segundo plano                                   │
+│ Resultado: Usuario ve evidencia de que sus vectores funcionan + alertas    │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ SEMANA 11-16: FASE 3 - Diferenciación                                     │
+├────────────────────────────────────────────────────────────────────────────┤
+│ Día 1-4:   3.1 Noticias reales + IA                                       │
+│ Día 5-7:   3.2 Strategy comparison                                        │
+│ Día 8-10:  3.3 P&L tracking de paper trades                               │
+│ Resultado: TradeIQ se separa de screeners clásicos                        │
+└────────────────────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+DEPENDENCIAS EXTERNAS Y CONFIGURACIÓN
+═══════════════════════════════════════════════════════════════════════════════
+
+LIBRERÍAS A INSTALAR:
+─────────────────────
+
+```bash
+# Backtesting y datos históricos
+bun add node-cache
+
+# Notificaciones
+bun add resend node-telegram-bot-api
+
+# Planificador de tareas (crons)
+bun add node-schedule
+
+# Cola de procesos async
+bun add bullmq redis
+
+# IA para sentimiento
+bun add @anthropic-ai/sdk
+
+# Alpaca Trading (ya probablemente tengas)
+bun add @alpacahq/alpaca-trade-api
+```
+
+VARIABLES DE ENTORNO A AGREGAR:
+───────────────────────────────
+
+```
+# Database (ya tienes)
+DATABASE_URL=postgresql://user:password@localhost:5432/tradeiq
+
+# Anthropic (para análisis de sentimiento)
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Email (Resend)
+RESEND_API_KEY=re_...
+
+# Telegram Bot
+TELEGRAM_BOT_TOKEN=123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11
+
+# Redis (para queue)
+REDIS_URL=redis://localhost:6379
+
+# Node environment
+NODE_ENV=development
+```
+
+INFRAESTRUCTURA:
+────────────────
+
+Para desarrollo local:
+- PostgreSQL: docker run --name postgres -e POSTGRES_PASSWORD=pwd -d postgres
+- Redis: docker run --name redis -d redis:alpine
+- NodeJS: bun (ya tienes)
+
+Para producción (Vercel + Upstash):
+- Base de datos: Vercel Postgres
+- Cache/Queue: Upstash Redis
+- Broker: Alpaca Markets (ya tienes)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+NOTAS IMPORTANTES
+═══════════════════════════════════════════════════════════════════════════════
+
+1. TESTING ES CRÍTICO
+   Después de cada tarea, test a fondo. Especialmente:
+   - Backtesting: valida manualmente al menos 2-3 trades contra TradingView
+   - Alertas: verifica que no envíe spam (cada 4+ horas)
+   - Multi-timeframe: que 2+ timeframes de acuerdo = mayor confianza
+
+2. PERFORMANCE
+   - Backtesting puede tardar 30+ segundos para 6 meses. Usar queue (Bull)
+   - Monitoreo de alertas: cada 5 minutos es suficiente
+   - Análisis de sentimiento: cachear por 1 hora mínimo
+
+3. PRIORIDADES REALES
+   Fase 1 es FUNDAMENTAL (sin ella, todo lo demás es inútil)
+   Fase 2 es lo que convierte el producto en valioso
+   Fase 3 es lo que lo diferencia de competencia
+   Fase 4 es solo si quieres negocio
+
+4. DOCUMENTACIÓN
+   - Mantén CLAUDE.md actualizado con cambios
+   - Documenta decisiones técnicas en docs/adr
+   - Escribe tests mientras desarrollas
+
+═══════════════════════════════════════════════════════════════════════════════
+FIN DE LA GUÍA
+═══════════════════════════════════════════════════════════════════════════════

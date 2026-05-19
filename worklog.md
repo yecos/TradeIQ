@@ -32,3 +32,35 @@ Stage Summary:
 - All modified files pass lint with zero errors
 - Root cause of "candles don't move" was BUG 1 (only 1 candle for intraday) + BUG 3 (WS updates overwritten)
 - Root cause of "candle history broken" was BUG 2 (daily candles on intraday scale) + BUG 1
+
+---
+Task ID: 4
+Agent: Super Z (main)
+Task: Fix candle history and real-time movement bugs — velas no aparecen y no se mueven
+
+Work Log:
+- Read WORKFLOW.md, CHANGELOG.md, docs/adr/ to understand project rules
+- Audited complete candle data flow: REST API → TanStack Query → page.tsx → TradingChart → useRealtimeCandles → WS
+- Started dev server and tested candle API endpoints — discovered server crashed on 1m requests
+- Identified 6 critical bugs:
+  1. MockProvider timestamps not aligned to interval boundaries (1m candles starting at :34 instead of :00)
+  2. utcToLocal() conversion in trading-chart.tsx destroyed timestamp alignment and broke WS merge matching
+  3. MockProvider generated up to 2000 candles causing OOM/crash on serverless functions
+  4. API route timeout too aggressive (9s) for multi-provider fallback chain
+  5. SmartProvider waited full 8s timeout on providers with auth errors (FORBIDDEN) instead of skipping
+  6. SmartProvider rejected mock data as "stale" forcing unnecessary retries
+- Fixed mock-provider.ts: snapped timestamps to interval boundaries, capped at 500 candles
+- Fixed trading-chart.tsx: removed utcToLocal() conversion, using UTC timestamps directly
+- Fixed candles/route.ts: increased timeout from 9s to 12s
+- Fixed smart-provider.ts: skip auth-failed providers immediately, skip freshness check for mock
+- Removed stale TradeIQ subdirectory that was causing build failures
+- Build: SUCCESS, Tests: 399/399 passing
+- Committed: c660018 "fix(chart): candle history and real-time movement bugs"
+- Pushed to GitHub — Vercel deploy triggered
+
+Stage Summary:
+- 6 critical bugs fixed across 5 files
+- Candle timestamps now properly aligned to interval boundaries
+- Server no longer crashes with 1m candle requests
+- WS updates will properly merge with chart data (both use UTC timestamps)
+- Auth-failed providers skip immediately instead of causing timeouts
