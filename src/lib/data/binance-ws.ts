@@ -83,11 +83,12 @@ interface BinanceKlineMessage {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-// US-first URL order: try binance.us first (works from US/Vercel/AWS),
-// then binance.com as fallback. This matches the REST API strategy.
+// Try binance.com first — it's more reliable for WebSocket streaming globally.
+// binance.us WebSocket has been observed to connect but not send data
+// from certain Vercel edge locations. Fall back to binance.us if needed.
 const WS_URLS = [
-  'wss://stream.binance.us:9443/ws',
   'wss://stream.binance.com:9443/ws',
+  'wss://stream.binance.us:9443/ws',
 ];
 
 const MAX_RECONNECT_ATTEMPTS = 20;
@@ -95,6 +96,7 @@ const BASE_RECONNECT_DELAY = 1000; // 1s
 const MAX_RECONNECT_DELAY = 30000; // 30s
 const PING_INTERVAL = 30000; // Binance recommends pinging every 30s
 const CONNECTION_TIMEOUT = 10000; // 10s to establish connection
+const FIRST_MESSAGE_TIMEOUT = 15000; // 15s to receive first message after connect
 
 /**
  * Convert our timeframe format to Binance WebSocket interval format.
@@ -149,10 +151,12 @@ export class BinanceKlineWS {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private connectionTimer: ReturnType<typeof setTimeout> | null = null;
+  private firstMessageTimer: ReturnType<typeof setTimeout> | null = null;
   private lastMessageTime: number | null = null;
   private latencyMs: number | null = null;
   private activeUrlIndex = 0;
   private disposed = false;
+  private hasReceivedFirstMessage = false;
 
   /**
    * Subscribe to real-time kline updates for a symbol and interval.
@@ -254,6 +258,7 @@ export class BinanceKlineWS {
       console.log(`[TradeIQ WS] Connected to ${url}`);
       this.setConnectionState('connected');
       this.reconnectAttempts = 0;
+      this.hasReceivedFirstMessage = false;
       this.startPing();
 
       // Clear connection timeout
@@ -261,6 +266,17 @@ export class BinanceKlineWS {
         clearTimeout(this.connectionTimer);
         this.connectionTimer = null;
       }
+
+      // Set first message timeout — if no data arrives within FIRST_MESSAGE_TIMEOUT,
+      // the WS endpoint is likely not sending data (observed with binance.us from Vercel).
+      // Try the next URL instead of waiting indefinitely.
+      this.firstMessageTimer = setTimeout(() => {
+        if (!this.hasReceivedFirstMessage && this.ws?.readyState === WebSocket.OPEN) {
+          console.warn('[TradeIQ WS] No first message received, trying next URL...');
+          this.cleanupConnection();
+          this.tryNextUrl();
+        }
+      }, FIRST_MESSAGE_TIMEOUT);
     };
 
     this.ws.onmessage = (event: MessageEvent) => {
@@ -271,6 +287,13 @@ export class BinanceKlineWS {
 
         // Only process kline events
         if (data.e !== 'kline' || !data.k) return;
+
+        // Mark that we've received at least one message — clears the first-message timeout
+        this.hasReceivedFirstMessage = true;
+        if (this.firstMessageTimer) {
+          clearTimeout(this.firstMessageTimer);
+          this.firstMessageTimer = null;
+        }
 
         const k = data.k;
         const now = Date.now();
@@ -384,6 +407,10 @@ export class BinanceKlineWS {
     if (this.connectionTimer) {
       clearTimeout(this.connectionTimer);
       this.connectionTimer = null;
+    }
+    if (this.firstMessageTimer) {
+      clearTimeout(this.firstMessageTimer);
+      this.firstMessageTimer = null;
     }
     if (this.ws) {
       // Remove handlers before closing to prevent onclose from triggering reconnect
