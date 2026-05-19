@@ -71,6 +71,9 @@ export class SmartProvider implements MarketDataProvider {
   private mockSymbols = new Set<string>();
   private staleSymbols = new Set<string>();
 
+  // Track last known real prices to anchor mock candles when real candle data is unavailable
+  private lastKnownPrices = new Map<string, number>();
+
   constructor(polygonApiKey?: string, finnhubApiKey?: string, alpacaApiKey?: string, alpacaApiSecret?: string) {
     this.coingecko = new CoinGeckoProvider();
     this.binance = new BinanceProvider();
@@ -143,6 +146,7 @@ export class SmartProvider implements MarketDataProvider {
         if (result) {
           this.mockSymbols.delete(symbol);
           // Anchor mock candle prices to real quote — ensures consistency if candles fall back to mock
+          this.lastKnownPrices.set(symbol.toUpperCase(), result.price);
           this.mock.setLastKnownPrice(symbol, result.price);
           return this.validateAndMarkQuote(result, false);
         }
@@ -449,6 +453,7 @@ export class SmartProvider implements MarketDataProvider {
 
     if (cgQuote) {
       this.cryptoQuoteCache.set(symbol, { data: cgQuote, timestamp: Date.now() });
+      this.lastKnownPrices.set(symbol.toUpperCase(), cgQuote.price);
       this.mock.setLastKnownPrice(symbol, cgQuote.price);
       return cgQuote;
     }
@@ -462,6 +467,7 @@ export class SmartProvider implements MarketDataProvider {
 
     if (binQuote) {
       this.cryptoQuoteCache.set(symbol, { data: binQuote, timestamp: Date.now() });
+      this.lastKnownPrices.set(symbol.toUpperCase(), binQuote.price);
       this.mock.setLastKnownPrice(symbol, binQuote.price);
       return binQuote;
     }
@@ -633,7 +639,29 @@ export class SmartProvider implements MarketDataProvider {
         );
       }
     }
-    // Last resort: generate mock
+    // Last resort: generate mock — but first try to anchor to a real price
+    // so the mock candles are in the same price range as real quotes.
+    // This prevents the jarring mismatch (e.g., quote=$222, candles=$131).
+    const lastPrice = this.lastKnownPrices.get(symbol.toUpperCase());
+    if (lastPrice) {
+      this.mock.setLastKnownPrice(symbol, lastPrice);
+    } else {
+      // No cached quote price — try a quick quote fetch to anchor the mock.
+      // This is important in serverless environments where each request may
+      // create a fresh SmartProvider instance with no price history.
+      try {
+        const quickQuote = await withTimeout(
+          this.getStockProvider().getQuote(symbol),
+          3000, // Short timeout — don't slow down the candle response
+          `quickQuote(${symbol})`
+        );
+        if (quickQuote?.price) {
+          this.mock.setLastKnownPrice(symbol, quickQuote.price);
+        }
+      } catch {
+        // Quick quote failed — use default seed price
+      }
+    }
     return this.mock.getCandles(symbol, days, interval);
   }
 
