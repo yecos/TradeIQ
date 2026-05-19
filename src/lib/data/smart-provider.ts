@@ -108,6 +108,26 @@ export class SmartProvider implements MarketDataProvider {
   }
 
   async getCandles(symbol: string, days: number = 180, interval: string = '1D'): Promise<Candle[]> {
+    // Pre-fetch a real quote price to anchor mock candles if needed.
+    // This is critical because Alpaca IEX free tier supports snapshots (quotes)
+    // but NOT the bars endpoint (returns 403). By fetching the quote first,
+    // we ensure mock candles start from the real price level.
+    if (!isCryptoSymbol(symbol) && this.alpaca) {
+      try {
+        const quote = await withTimeout(
+          this.alpaca.getQuote(symbol),
+          3000,
+          `preFetchQuote(${symbol})`
+        );
+        if (quote?.price) {
+          this.lastKnownPrices.set(symbol.toUpperCase(), quote.price);
+          this.mock.setLastKnownPrice(symbol, quote.price);
+        }
+      } catch {
+        // Quote pre-fetch failed — will use default seed price
+      }
+    }
+
     if (isCryptoSymbol(symbol)) {
       // For daily/weekly crypto: MERGE CoinGecko (deep history) + Binance (real-time today)
       if (['1D', '1W'].includes(interval)) {
