@@ -64,3 +64,33 @@ Stage Summary:
 - Server no longer crashes with 1m candle requests
 - WS updates will properly merge with chart data (both use UTC timestamps)
 - Auth-failed providers skip immediately instead of causing timeouts
+
+---
+Task ID: 2
+Agent: Main
+Task: Fix real-time price updates not working on trade-iq-smoky.vercel.app
+
+Work Log:
+- Investigated the production site with browser automation (agent-browser)
+- Discovered 3 root causes:
+  1. NEXT_PUBLIC_ALPACA vars not in build (env vars added AFTER the previous deployment)
+  2. Binance.US WebSocket connects but never sends data (from Vercel edge)
+  3. Alpaca WS "connection limit exceeded" — multiple reconnect attempts spamming the API
+- Fixed binance-ws.ts:
+  - Changed URL order: binance.com FIRST (more reliable), binance.us as fallback
+  - Added first-message timeout (15s): auto-switches to next URL if no data received after connect
+  - Added hasReceivedFirstMessage flag and firstMessageTimer cleanup
+- Fixed alpaca-ws.ts:
+  - Stop reconnecting on "connection limit exceeded" error (prevents making it worse)
+  - Reduced MAX_RECONNECT_ATTEMPTS from 10 to 3
+  - Increased BASE_RECONNECT_DELAY from 1s to 3s
+- Configured env vars in ALL 4 TradeIQ Vercel projects (trade-iq, trade-iq-gs6l, my-project, yecos-tradeiq)
+- Pushed new commit, triggered fresh build with env vars embedded
+- Verified in production: Alpaca WS authenticates successfully, Binance WS connects to binance.com
+- Confirmed price update: BTC went from $76,853 to $76,867 in 30 seconds
+
+Stage Summary:
+- Real-time updates are now working on trade-iq-smoky.vercel.app
+- Both Binance WS (crypto) and Alpaca WS (stocks) connect successfully
+- LIVE indicator shows on the chart
+- Prices update in real-time (confirmed with BTC price change)
