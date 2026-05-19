@@ -99,14 +99,14 @@ export function DataProviderSetup({ onRefresh }: DataProviderSetupProps) {
     },
     {
       name: 'Alpaca',
-      key: 'NEXT_PUBLIC_ALPACA_API_KEY',
+      key: 'ALPACA_API_KEY + NEXT_PUBLIC_ALPACA_API_KEY',
       icon: 'ALP',
-      description: 'Streaming en tiempo real para acciones (IEX feed) + Broker',
+      description: 'Acciones en tiempo real (SDK oficial) — velas históricas, cotizaciones, broker, WebSocket IEX',
       registerUrl: 'https://app.alpaca.markets/signup',
       isConfigured: !!(process.env.NEXT_PUBLIC_ALPACA_API_KEY && process.env.NEXT_PUBLIC_ALPACA_API_SECRET),
-      isActive: !!(process.env.NEXT_PUBLIC_ALPACA_API_KEY && process.env.NEXT_PUBLIC_ALPACA_API_SECRET),
-      coversAssets: 'Acciones WS + Broker',
-      freeLimit: 'IEX gratuito',
+      isActive: marketStatus?.activeProviders?.includes('alpaca') ?? !!(process.env.NEXT_PUBLIC_ALPACA_API_KEY && process.env.NEXT_PUBLIC_ALPACA_API_SECRET),
+      coversAssets: 'Acciones REST + WS + Broker',
+      freeLimit: '200 req/min + IEX WS gratis',
       color: 'text-purple-400',
     },
     {
@@ -125,7 +125,7 @@ export function DataProviderSetup({ onRefresh }: DataProviderSetupProps) {
 
   const configuredCount = providers.filter(p => p.isConfigured).length;
   const totalProviders = providers.length;
-  const hasRealStockData = providers.some(p => p.name === 'Finnhub' && p.isActive);
+  const hasRealStockData = providers.some(p => (p.name === 'Alpaca' || p.name === 'Finnhub') && p.isActive);
 
   return (
     <div className="rounded-lg border border-white/10 bg-white/[0.02] overflow-hidden">
@@ -177,7 +177,7 @@ export function DataProviderSetup({ onRefresh }: DataProviderSetupProps) {
                   : 'Datos simulados — configura API keys para datos reales'}
               </p>
               <p className="text-[9px] text-gray-500">
-                Crypto funciona con datos reales sin claves. Acciones/Forex requieren Finnhub (gratuito).
+                Crypto funciona con datos reales sin claves. Acciones requieren Alpaca (recomendado) o Finnhub.
               </p>
             </div>
           </div>
@@ -246,10 +246,16 @@ export function DataProviderSetup({ onRefresh }: DataProviderSetupProps) {
                 <span className="text-[10px] font-semibold text-amber-300">Como activar datos reales</span>
               </div>
               <ol className="text-[9px] text-amber-200/80 space-y-1 ml-4 list-decimal">
-                <li>Registrate en <a href="https://finnhub.io/register" target="_blank" rel="noopener noreferrer" className="text-cyan-400 underline">finnhub.io/register</a> (gratis)</li>
-                <li>Copia tu API key del dashboard</li>
-                <li>Agrega <code className="px-1 bg-black/30 rounded text-amber-300">FINNHUB_API_KEY=tu_clave</code> en el archivo .env</li>
-                <li>Para streaming en tiempo real de acciones, registra tambien en <a href="https://app.alpaca.markets/signup" target="_blank" rel="noopener noreferrer" className="text-cyan-400 underline">Alpaca</a></li>
+                <li>Registrate en <a href="https://app.alpaca.markets/signup" target="_blank" rel="noopener noreferrer" className="text-cyan-400 underline">Alpaca</a> (gratis) — datos de acciones en tiempo real + broker</li>
+                <li>Ve al dashboard → API Keys → Generate New Keys</li>
+                <li>Copia el <strong>API Key ID</strong> (PK...) y el <strong>Secret Key</strong></li>
+                <li>Agrega en Vercel o .env:
+                  <code className="block mt-0.5 px-1 bg-black/30 rounded text-amber-300 text-[8px]">ALPACA_API_KEY=PK_tu_key</code>
+                  <code className="block mt-0.5 px-1 bg-black/30 rounded text-amber-300 text-[8px]">ALPACA_API_SECRET=tu_secret</code>
+                  <code className="block mt-0.5 px-1 bg-black/30 rounded text-amber-300 text-[8px]">NEXT_PUBLIC_ALPACA_API_KEY=PK_tu_key</code>
+                  <code className="block mt-0.5 px-1 bg-black/30 rounded text-amber-300 text-[8px]">NEXT_PUBLIC_ALPACA_API_SECRET=tu_secret</code>
+                </li>
+                <li>Opcional: Tambien registra en <a href="https://finnhub.io/register" target="_blank" rel="noopener noreferrer" className="text-cyan-400 underline">Finnhub</a> como backup</li>
                 <li>Reinicia la aplicacion</li>
               </ol>
             </div>

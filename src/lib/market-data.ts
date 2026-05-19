@@ -2,8 +2,8 @@
  * Market Data — thin wrapper that delegates to the SmartProvider.
  *
  * The SmartProvider automatically routes:
- * - Crypto symbols (BTC, ETH, etc.) → Binance (free, real-time)
- * - Stock symbols (AAPL, NVDA, etc.) → Polygon (if API key) or Mock
+ * - Crypto symbols (BTC, ETH, etc.) → CoinGecko (primary) → Binance (secondary)
+ * - Stock symbols (AAPL, NVDA, etc.) → Alpaca (primary, if keys) → Finnhub → Polygon → Mock
  * - Fallback → Mock for any failures
  *
  * Zero breaking changes — all existing code that imports from this module
