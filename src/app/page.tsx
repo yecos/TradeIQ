@@ -48,7 +48,6 @@ import {
 import { toast } from 'sonner';
 import { LoadingScreen } from '@/components/loading-screen';
 import { useRealtimeWatchlistPrices } from '@/hooks/use-realtime-watchlist-prices';
-import type { RealtimeQuote } from '@/hooks/use-realtime-watchlist-prices';
 
 interface BrokerConfig {
   id?: string;
