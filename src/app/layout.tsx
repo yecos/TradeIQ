@@ -17,6 +17,9 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "TradeIQ - Análisis de Trading con IA",
   description: "Plataforma de análisis semi-automático de trading con IA multivector",
+  icons: {
+    icon: "/favicon.ico",
+  },
 };
 
 export const viewport: Viewport = {

@@ -15,11 +15,13 @@ import { getToken } from 'next-auth/jwt';
  * - /api/market/* — Market data (read-only, safe to expose)
  * - /api/health — Health check
  *
+ * Public analysis routes (rate-limited, no auth required):
+ * - /api/analyze — Multi-vector analysis (read-only, rate-limited)
+ *
  * Protected routes (auth required):
  * - /api/trade/* — Trade execution
  * - /api/broker/* — Broker operations (API keys, positions, orders)
- * - /api/analyze — Multi-vector analysis (costs API credits)
- * - /api/ai-analysis — AI analysis endpoint
+ * - /api/ai-analysis — AI analysis endpoint (costs API credits)
  * - /api/ai-trades/* — AI trade tracker
  * - /api/backtest — Backtesting engine
  *
@@ -39,7 +41,6 @@ const RATE_WINDOW = 60_000; // 1 minute
 const PROTECTED_ROUTES = [
   '/api/trade',
   '/api/broker',
-  '/api/analyze',
   '/api/ai-analysis',
   '/api/ai-trades',
   '/api/backtest',

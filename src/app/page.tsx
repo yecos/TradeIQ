@@ -257,7 +257,27 @@ export default function TradeIQDashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ symbol: selectedSymbol, vectors: enabledVectors }),
       });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ error: 'Error desconocido' }));
+        if (res.status === 401) {
+          toast.error('Sesión expirada. Inicia sesión para analizar.');
+        } else if (res.status === 429) {
+          toast.error('Demasiadas solicitudes. Espera un momento e intenta de nuevo.');
+        } else {
+          toast.error(errorData.error || 'Error al analizar. Intenta de nuevo.');
+        }
+        setIsAnalyzing(false);
+        return;
+      }
+
       const data = await res.json();
+
+      if (data.error) {
+        toast.error(data.error);
+        setIsAnalyzing(false);
+        return;
+      }
 
       setAnalysisForSymbol(selectedSymbol);
       if (data.technical) setTechnical(data.technical);
@@ -273,9 +293,11 @@ export default function TradeIQDashboard() {
           addSignal(data.confluence);
         }
       }
-      toast.success(`Análisis completado: ${data.confluence?.overallDirection} (${data.confluence?.confluenceScore}% confluencia)`);
+      const dir = data.confluence?.overallDirection || 'N/A';
+      const score = data.confluence?.confluenceScore ?? 0;
+      toast.success(`Análisis completado: ${dir} (${score}% confluencia)`);
     } catch {
-      toast.error('Error al analizar. Intenta de nuevo.');
+      toast.error('Error de conexión. Intenta de nuevo.');
     }
     setIsAnalyzing(false);
   }, [selectedSymbol, enabledVectors, setIsAnalyzing, setLastConfluence, addSignal]);
