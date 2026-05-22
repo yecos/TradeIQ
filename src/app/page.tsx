@@ -894,13 +894,27 @@ export default function TradeIQDashboard() {
       <div className="flex-1 flex overflow-hidden">
 
         {/* ── MOBILE LAYOUT (< md) ── */}
-        <div className="flex-1 md:hidden overflow-hidden">
-          {mobileTab === 'chart' && mobileChartView}
-          {mobileTab === 'analysis' && mobileAnalysisView}
-          {mobileTab === 'tracker' && mobileTrackerView}
-          {mobileTab === 'ai' && mobileAIView}
-          {mobileTab === 'portfolio' && mobilePortfolioView}
-          {mobileTab === 'settings' && mobileSettingsView}
+        {/* FIX: Use CSS display instead of conditional rendering to keep chart mounted. */}
+        {/* When TradingChart unmounts, the WS connection and chart state are lost, causing "disappearing chart". */}
+        <div className="flex-1 md:hidden overflow-hidden relative">
+          <div className="absolute inset-0" style={{ display: mobileTab === 'chart' ? 'flex' : 'none' }}>
+            {mobileChartView}
+          </div>
+          <div className="absolute inset-0 overflow-y-auto custom-scrollbar" style={{ display: mobileTab === 'analysis' ? 'block' : 'none' }}>
+            {mobileAnalysisView}
+          </div>
+          <div className="absolute inset-0 overflow-y-auto custom-scrollbar" style={{ display: mobileTab === 'tracker' ? 'block' : 'none' }}>
+            {mobileTrackerView}
+          </div>
+          <div className="absolute inset-0 overflow-y-auto custom-scrollbar" style={{ display: mobileTab === 'ai' ? 'block' : 'none' }}>
+            {mobileAIView}
+          </div>
+          <div className="absolute inset-0 overflow-y-auto custom-scrollbar" style={{ display: mobileTab === 'portfolio' ? 'block' : 'none' }}>
+            {mobilePortfolioView}
+          </div>
+          <div className="absolute inset-0 overflow-y-auto custom-scrollbar" style={{ display: mobileTab === 'settings' ? 'block' : 'none' }}>
+            {mobileSettingsView}
+          </div>
         </div>
 
         {/* ── DESKTOP LAYOUT (≥ md) ── */}

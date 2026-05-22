@@ -41,15 +41,12 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
   }, [wsState, isRealtime, latencyMs, onWSStateChange]);
 
   // ─── Hydration-safe timezone display ─────────────────────────────
-  // getTimezoneDisplay() returns different values on server (UTC) vs client (local TZ)
-  // Fix: initialize as empty string, set on client-only useEffect
   const [tzDisplay, setTzDisplay] = useState('');
   useEffect(() => {
     setTzDisplay(getTimezoneDisplay());
   }, []);
 
   // ─── Hydration-safe mounted flag ─────────────────────────────────
-  // Prevents rendering dynamic content that differs between server and client
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
     setMounted(true);
@@ -60,6 +57,43 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
     open: number; high: number; low: number; close: number;
     volume: number; time: string; change: number;
   } | null>(null);
+
+  // ─── CRITICAL FIX: Use ref for crosshair callback to prevent chart recreation ───
+  // The crosshair callback needs access to realtimeCandles but we must NOT
+  // make it a dependency of the chart creation effect. Store it in a ref.
+  const realtimeCandlesRef = useRef<Candle[]>(realtimeCandles);
+  realtimeCandlesRef.current = realtimeCandles;
+
+  const crosshairCallbackRef = useRef<(param: any) => void>(() => {});
+
+  // Update the callback whenever realtimeCandles changes
+  crosshairCallbackRef.current = useCallback((param: any) => {
+    const currentCandles = realtimeCandlesRef.current;
+    if (!param || !param.time || !param.seriesData) {
+      if (currentCandles.length > 0) {
+        const last = currentCandles[currentCandles.length - 1];
+        setCrosshairData({
+          open: last.open, high: last.high, low: last.low, close: last.close,
+          volume: last.volume, time: new Date(last.time * 1000).toLocaleTimeString(),
+          change: last.close - last.open,
+        });
+      }
+      return;
+    }
+
+    const candleData = param.seriesData.get(candlestickSeriesRef.current);
+    const volumeData = param.seriesData.get(volumeSeriesRef.current);
+
+    if (candleData) {
+      const cd = candleData as any;
+      setCrosshairData({
+        open: cd.open, high: cd.high, low: cd.low, close: cd.close,
+        volume: (volumeData as any)?.value ?? 0,
+        time: new Date((param.time as number) * 1000).toLocaleTimeString(),
+        change: cd.close - cd.open,
+      });
+    }
+  }, []);
 
   // Get the last close for the current price line
   const lastClose = useMemo(() => {
@@ -82,35 +116,10 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
     return price.toFixed(4);
   }, []);
 
-  // Crosshair move handler
-  const handleCrosshairMove = useCallback((param: any) => {
-    if (!param || !param.time || !param.seriesData) {
-      if (realtimeCandles.length > 0) {
-        const last = realtimeCandles[realtimeCandles.length - 1];
-        setCrosshairData({
-          open: last.open, high: last.high, low: last.low, close: last.close,
-          volume: last.volume, time: new Date(last.time * 1000).toLocaleTimeString(),
-          change: last.close - last.open,
-        });
-      }
-      return;
-    }
-
-    const candleData = param.seriesData.get(candlestickSeriesRef.current);
-    const volumeData = param.seriesData.get(volumeSeriesRef.current);
-
-    if (candleData) {
-      const cd = candleData as any;
-      setCrosshairData({
-        open: cd.open, high: cd.high, low: cd.low, close: cd.close,
-        volume: (volumeData as any)?.value ?? 0,
-        time: new Date((param.time as number) * 1000).toLocaleTimeString(),
-        change: cd.close - cd.open,
-      });
-    }
-  }, [realtimeCandles]);
-
-  // Create chart once on mount
+  // ─── Create chart ONCE on mount — NEVER re-create ────────────────────
+  // FIX: Removed handleCrosshairMove from dependency array.
+  // The chart must only be created once and destroyed on unmount.
+  // The crosshair callback is accessed via ref so it's always current.
   useEffect(() => {
     if (!chartContainerRef.current) return;
 
@@ -162,7 +171,10 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
       scaleMargins: { top: 0.85, bottom: 0 },
     });
 
-    chart.subscribeCrosshairMove(handleCrosshairMove);
+    // Use the ref-based callback so the chart subscription is stable
+    chart.subscribeCrosshairMove((param: any) => {
+      crosshairCallbackRef.current(param);
+    });
 
     // Track user scrolling for auto-scroll behavior
     const ts = chart.timeScale();
@@ -191,8 +203,6 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
     resizeObserver.observe(container);
 
     return () => {
-      chart.unsubscribeCrosshairMove(handleCrosshairMove);
-      // timeScale subscriptions are cleaned up by chart.remove()
       resizeObserver.disconnect();
       chart.remove();
       chartRef.current = null;
@@ -203,7 +213,7 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
       lastChartTimeRef.current = null;
       lastChartCloseRef.current = null;
     };
-  }, [handleCrosshairMove]);
+  }, []); // ← EMPTY dependency array: chart is created ONCE
 
   // ─── Data Update Logic ────────────────────────────────────────────────
   // KEY: Use `series.update()` for incremental changes (O(1), smooth like MetaTrader)
@@ -229,7 +239,11 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
 
       series.setData(candlesMapped);
       volSeries.setData(volumeMapped);
-      chartRef.current?.timeScale().fitContent();
+
+      // Only fitContent on symbol change, not on every re-initialization
+      if (isSymbolChange) {
+        chartRef.current?.timeScale().fitContent();
+      }
 
       prevSymbolRef.current = symbol;
       chartInitializedRef.current = true;
