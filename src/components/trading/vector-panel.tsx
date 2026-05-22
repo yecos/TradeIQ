@@ -12,6 +12,7 @@ import {
   Newspaper,
   Brain,
   Building2,
+  AlertTriangle,
 } from 'lucide-react';
 
 const iconMap: Record<string, React.ElementType> = {
@@ -35,12 +36,15 @@ export function VectorPanel() {
         {VECTOR_DEFINITIONS.map((vector) => {
           const Icon = iconMap[vector.icon] || TrendingUp;
           const isEnabled = enabledVectors.includes(vector.name);
+          const isSimulated = vector.isSimulated;
 
           return (
             <div
               key={vector.id}
               className={`flex items-center justify-between p-2.5 rounded-lg transition-all ${
-                isEnabled
+                isSimulated
+                  ? 'trading-card opacity-40 border border-dashed border-white/10'
+                  : isEnabled
                   ? 'trading-card-accent'
                   : 'trading-card opacity-50'
               }`}
@@ -53,9 +57,19 @@ export function VectorPanel() {
                   <Icon className="w-3.5 h-3.5" style={{ color: vector.color }} />
                 </div>
                 <div className="min-w-0">
-                  <Label className="text-xs font-medium text-gray-200 cursor-pointer truncate block">
-                    {vector.label}
-                  </Label>
+                  <div className="flex items-center gap-1.5">
+                    <Label className={`text-xs font-medium cursor-pointer truncate block ${
+                      isSimulated ? 'text-gray-400' : 'text-gray-200'
+                    }`}>
+                      {vector.label}
+                    </Label>
+                    {isSimulated && (
+                      <Badge className="text-[7px] border-0 bg-amber-500/20 text-amber-400 h-4 px-1 flex items-center gap-0.5">
+                        <AlertTriangle className="w-2.5 h-2.5" />
+                        SIMULADO
+                      </Badge>
+                    )}
+                  </div>
                   <p className="text-[10px] text-gray-500 truncate">
                     {vector.description}
                   </p>
@@ -65,6 +79,7 @@ export function VectorPanel() {
                 checked={isEnabled}
                 onCheckedChange={() => toggleVector(vector.name)}
                 className="data-[state=checked]:bg-emerald-600 scale-75"
+                aria-label={`Toggle ${vector.label} vector`}
               />
             </div>
           );

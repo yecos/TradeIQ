@@ -72,11 +72,12 @@ export const VECTOR_DEFINITIONS: VectorDefinition[] = [
     id: 'orderflow',
     category: 'orderflow' as const,
     name: 'orderflow',
-    label: 'Order Flow',
-    description: 'Análisis del flujo de órdenes, libro de órdenes y microestructura del mercado',
+    label: 'Order Flow (Próximamente)',
+    description: 'Análisis del flujo de órdenes, libro de órdenes y microestructura del mercado — aún no implementado',
     icon: 'BarChart3',
     color: '#f97316',
-    defaultEnabled: false, // Off by default since it requires extra API calls
+    defaultEnabled: false, // Off by default — not yet implemented
     defaultWeight: 1.1,
+    isSimulated: true, // Flag: this vector is not yet implemented
   },
 ];

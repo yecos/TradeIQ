@@ -125,6 +125,12 @@ export function SignalCard({ signal, onSave, onExecute, brokerConnected = false 
           >
             {signal.overallDirection}
           </Badge>
+          {signal.isSimulated && (
+            <Badge className="text-[8px] border-0 bg-amber-500/20 text-amber-400">
+              <AlertTriangle className="w-2.5 h-2.5 mr-0.5" />
+              SIM
+            </Badge>
+          )}
         </div>
         <Badge
           className={`text-[10px] border-0 hidden sm:inline-flex ${
@@ -149,6 +155,14 @@ export function SignalCard({ signal, onSave, onExecute, brokerConnected = false 
           {signal.confluenceScore}%
         </span>
       </div>
+
+      {/* Data simulation warning */}
+      {signal.dataWarning && (
+        <div className="flex items-start gap-1.5 p-2 rounded bg-amber-500/10 border border-amber-500/20 mb-2">
+          <AlertTriangle className="w-3 h-3 text-amber-400 mt-0.5 flex-shrink-0" />
+          <span className="text-[9px] text-amber-300 leading-tight">{signal.dataWarning}</span>
+        </div>
+      )}
 
       <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-2 text-xs">
         <div>

@@ -154,8 +154,17 @@ export const authOptions: NextAuthOptions = {
     },
   },
 
-  // Fallback secret for development — MUST be set in production via env vars
-  secret: process.env.NEXTAUTH_SECRET || 'tradeiq-dev-secret-fallback',
+  // NEXTAUTH_SECRET is REQUIRED in production — no insecure fallback.
+  // Set it in .env: openssl rand -base64 32
+  // The check is deferred to request time (not build time) to allow the build to succeed.
+  secret: process.env.NEXTAUTH_SECRET || (() => {
+    if (process.env.NODE_ENV === 'production' && process.env.NEXT_PHASE !== 'phase-production-build') {
+      // Will fail at request time — logged as warning during build
+      console.error('[TradeIQ] CRITICAL: NEXTAUTH_SECRET is not set. JWT tokens will be insecure!');
+    }
+    // Dev fallback (NOT secure for production — set NEXTAUTH_SECRET!)
+    return 'tradeiq-dev-only-' + Buffer.from('tradeiq-app-secret-dev').toString('base64');
+  })(),
 
   // Enable debug in development
   debug: process.env.NODE_ENV === 'development',

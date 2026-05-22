@@ -89,6 +89,8 @@ export interface VectorDefinition {
   color: string;
   defaultEnabled: boolean;
   defaultWeight: number;
+  /** If true, this vector uses simulated/approximated data, not real market data */
+  isSimulated?: boolean;
 }
 
 export interface VectorSignal {
@@ -99,6 +101,8 @@ export interface VectorSignal {
   confidence: number; // 0-100
   detail: string;
   priceTarget?: number;
+  /** If true, this signal was generated from simulated/approximated data, not real market data */
+  isSimulated?: boolean;
 }
 
 // Analysis Types
@@ -222,6 +226,10 @@ export interface ConfluenceResult {
   recommendation: string;
   timeframeRecommendation?: TimeframeRecommendation;
   timestamp: number;
+  /** If true, this confluence result is based on simulated/approximated data */
+  isSimulated?: boolean;
+  /** Warning message for simulated data contexts */
+  dataWarning?: string;
 }
 
 // Order Flow Types

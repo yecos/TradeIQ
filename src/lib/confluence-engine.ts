@@ -33,10 +33,12 @@ export async function generateConfluence(
   const lastPrice = candles[candles.length - 1].close;
   const atr = calculateSimpleATR(candles);
 
-  // Build weight map from VECTOR_DEFINITIONS
+  // Build weight map and simulated set from VECTOR_DEFINITIONS
   const weightMap = new Map<string, number>();
+  const simulatedVectors = new Set<string>();
   for (const def of VECTOR_DEFINITIONS) {
     weightMap.set(def.id, def.defaultWeight);
+    if (def.isSimulated) simulatedVectors.add(def.id);
   }
 
   // Use precomputed results if available, otherwise compute them
@@ -62,52 +64,58 @@ export async function generateConfluence(
     macro = await analyzeMacro(symbol);
   }
 
-  // Collect signals from all enabled vectors, applying weights
+  // Collect signals from all enabled vectors, applying weights and isSimulated flag
   if (technical && enabledVectors.includes('technical')) {
     const weight = weightMap.get('technical') ?? 1.0;
+    const isSim = simulatedVectors.has('technical');
     allSignals.push(...technical.signals
       .filter(s => s.direction !== 'NEUTRAL')
-      .map(s => ({ ...s, strength: Math.round(s.strength * weight) }))
+      .map(s => ({ ...s, strength: Math.round(s.strength * weight), isSimulated: isSim }))
     );
   }
 
   if (patterns && enabledVectors.includes('pattern')) {
     const weight = weightMap.get('pattern') ?? 1.2;
+    const isSim = simulatedVectors.has('pattern');
     allSignals.push(...patterns.signals
       .filter(s => s.direction !== 'NEUTRAL')
-      .map(s => ({ ...s, strength: Math.round(s.strength * weight) }))
+      .map(s => ({ ...s, strength: Math.round(s.strength * weight), isSimulated: isSim }))
     );
   }
 
   if (volume && enabledVectors.includes('volume')) {
     const weight = weightMap.get('volume') ?? 1.1;
+    const isSim = simulatedVectors.has('volume');
     allSignals.push(...volume.signals
       .filter(s => s.direction !== 'NEUTRAL')
-      .map(s => ({ ...s, strength: Math.round(s.strength * weight) }))
+      .map(s => ({ ...s, strength: Math.round(s.strength * weight), isSimulated: isSim }))
     );
   }
 
   if (news && enabledVectors.includes('news')) {
     const weight = weightMap.get('news') ?? 1.3;
+    const isSim = simulatedVectors.has('news');
     allSignals.push(...news.signals
       .filter(s => s.direction !== 'NEUTRAL')
-      .map(s => ({ ...s, strength: Math.round(s.strength * weight) }))
+      .map(s => ({ ...s, strength: Math.round(s.strength * weight), isSimulated: isSim }))
     );
   }
 
   if (sentiment && enabledVectors.includes('sentiment')) {
     const weight = weightMap.get('sentiment') ?? 0.8;
+    const isSim = simulatedVectors.has('sentiment');
     allSignals.push(...sentiment.signals
       .filter(s => s.direction !== 'NEUTRAL')
-      .map(s => ({ ...s, strength: Math.round(s.strength * weight) }))
+      .map(s => ({ ...s, strength: Math.round(s.strength * weight), isSimulated: isSim }))
     );
   }
 
   if (macro && enabledVectors.includes('macro')) {
     const weight = weightMap.get('macro') ?? 0.7;
+    const isSim = simulatedVectors.has('macro');
     allSignals.push(...macro.signals
       .filter(s => s.direction !== 'NEUTRAL')
-      .map(s => ({ ...s, strength: Math.round(s.strength * weight) }))
+      .map(s => ({ ...s, strength: Math.round(s.strength * weight), isSimulated: isSim }))
     );
   }
 
@@ -219,6 +227,10 @@ export async function generateConfluence(
     recommendation,
     timeframeRecommendation,
     timestamp: Date.now(),
+    isSimulated: allSignals.some(s => s.isSimulated),
+    dataWarning: allSignals.some(s => s.isSimulated)
+      ? 'ADVERTENCIA: Algunos vectores usan datos simulados. No operes con dinero real basándote solo en estos resultados.'
+      : undefined,
   };
 }
 

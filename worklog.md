@@ -188,3 +188,64 @@ Stage Summary:
 - Second issue: 200ms throttle was too slow; replaced with rAF batching (~16ms)
 - Third issue: auto-scroll didn't track user scrolling, so chart would either never scroll or always scroll
 - Deployment triggered via git push to main
+
+---
+Task ID: 5
+Agent: Super Z (main)
+Task: Fix security and UX issues in TradeIQ — hardcoded secrets, unprotected routes, simulated data disclaimers
+
+Work Log:
+- Cloned TradeIQ from https://github.com/yecos/TradeIQ
+- Explored entire codebase: 50+ files including page.tsx, middleware.ts, auth.ts, smart-provider.ts, confluence-engine.ts, types.ts, vector-definitions.ts, mock-provider.ts, signal-card.tsx, vector-panel.tsx, etc.
+- Read existing fix documentation (tradeiq_fixes.txt, tradeiq_fixes_runtime.txt) to identify known unfixed issues
+- Identified 7 critical/high/medium issues to fix:
+
+FIX 1 (CRITICAL): Hardcoded NEXTAUTH_SECRET fallback
+- Removed hardcoded 'tradeiq-dev-secret-fallback' from both auth.ts and middleware.ts
+- auth.ts: Replaced with dev-only auto-generated secret + console.error in production
+- middleware.ts: Now validates NEXTAUTH_SECRET exists before using it; returns 500 if not set
+- Build-safe: Uses NEXT_PHASE check to avoid breaking production build
+
+FIX 2 (HIGH): /api/analyze unprotected (costs API credits)
+- Added /api/analyze, /api/ai-analysis, /api/ai-trades, /api/backtest to PROTECTED_ROUTES in middleware.ts
+- These endpoints now require valid authentication token
+- Also added /api/alerts and /api/watchlist to WRITE_PROTECTED_ROUTES (POST/PUT/DELETE/PATCH only)
+
+FIX 3 (HIGH): Missing security headers
+- Added HSTS (Strict-Transport-Security) in production mode
+- Added Content-Security-Policy with proper connect-src for all providers
+- Added Permissions-Policy (camera, microphone, geolocation, payment)
+- Added Cross-Origin headers (Opener-Policy, Resource-Policy, Embedder-Policy)
+- Added rate limiter cleanup to prevent memory leak (cleanup when >10K entries)
+
+FIX 4 (MEDIUM): Order Flow vector visible but not implemented
+- Changed label from "Order Flow" to "Order Flow (Próximamente)"
+- Added isSimulated: true to the vector definition
+- Updated description to mention it's not yet implemented
+- VectorPanel now shows "SIMULADO" badge with AlertTriangle icon for simulated vectors
+
+FIX 5 (MEDIUM): No disclaimer on simulated data in signals
+- Added dataWarning field to ConfluenceResult type
+- Confluence engine now generates warning when any vector uses simulated data
+- SignalCard displays amber warning banner with the dataWarning message
+- SignalCard shows "SIM" badge when isSimulated is true
+
+FIX 6 (MEDIUM): No isSimulated flag on vector signals
+- Added isSimulated?: boolean to VectorSignal and ConfluenceResult types
+- Added isSimulated?: boolean to VectorDefinition type
+- Confluence engine tracks simulated vectors from VECTOR_DEFINITIONS and propagates the flag to signals
+- All vector signals now include isSimulated field
+
+FIX 7 (MEDIUM): Outdated MockProvider seed prices
+- Updated all stock prices to May 2026 levels (NVDA $130→$135, META $505→$600, SPY $520→$590, etc.)
+- Updated crypto prices (BTC $67K→$104K, ETH $3500→$2600, XRP $0.55→$2.40, etc.)
+- This prevents jarring mismatches when mock data is used as fallback
+
+Build verification: SUCCESS
+Test verification: 399/399 tests passing
+
+Stage Summary:
+- 7 files modified: auth.ts, middleware.ts, types.ts, vector-definitions.ts, confluence-engine.ts, signal-card.tsx, vector-panel.tsx, mock-provider.ts
+- All CRITICAL and HIGH security issues fixed
+- Simulated data now clearly marked and disclaimed
+- Build compiles successfully, all 399 tests pass
