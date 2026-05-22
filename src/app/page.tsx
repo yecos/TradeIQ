@@ -47,6 +47,8 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { LoadingScreen } from '@/components/loading-screen';
+import { useRealtimeWatchlistPrices } from '@/hooks/use-realtime-watchlist-prices';
+import type { RealtimeQuote } from '@/hooks/use-realtime-watchlist-prices';
 
 interface BrokerConfig {
   id?: string;
@@ -165,6 +167,45 @@ export default function TradeIQDashboard() {
     retry: 1,
     staleTime: isRealtimeWS ? 30000 : 5000,
   });
+
+  // ─── Real-time Watchlist Prices via WebSocket ────────────────────
+  // Merges WS live prices with REST quote data for all watchlist symbols.
+  // Crypto: Binance mini-ticker WS (all pairs, ~1s updates, no API key)
+  // Stocks: Finnhub WS (multi-symbol, requires API key) or TwelveData WS
+  const { quotes: realtimeQuotes, isLive: isWatchlistLive, liveCount: watchlistLiveCount } = useRealtimeWatchlistPrices(
+    quotes,
+    watchlist,
+  );
+
+  // Build merged quotes array for the watchlist panel
+  const mergedQuotes: Quote[] = watchlist.map(symbol => {
+    const upper = symbol.toUpperCase();
+    const rt = realtimeQuotes.get(upper);
+    const rest = quotes.find(q => q.symbol.toUpperCase() === upper);
+    if (rt && rt.isRealtime) {
+      // Prefer real-time data, merge with REST for name/missing fields
+      return {
+        symbol: upper,
+        name: rest?.name || rt.name,
+        price: rt.price,
+        change: rt.change,
+        changePercent: rt.changePercent,
+        volume: rt.volume || rest?.volume || 0,
+        high: rt.high || rest?.high || 0,
+        low: rt.low || rest?.low || 0,
+        open: rt.open || rest?.open || 0,
+        prevClose: rest?.prevClose || 0,
+        isMock: rest?.isMock,
+      };
+    }
+    return rest || { symbol: upper, name: upper, price: 0, change: 0, changePercent: 0, volume: 0, high: 0, low: 0, open: 0, prevClose: 0 };
+  });
+
+  // Current symbol quote with real-time price
+  const currentRealtimeQuote = realtimeQuotes.get(selectedSymbol.toUpperCase());
+  const currentQuote = currentRealtimeQuote?.isRealtime
+    ? { ...quotes.find(q => q.symbol.toUpperCase() === selectedSymbol.toUpperCase()), price: currentRealtimeQuote.price, change: currentRealtimeQuote.change, changePercent: currentRealtimeQuote.changePercent, open: currentRealtimeQuote.open, high: currentRealtimeQuote.high, low: currentRealtimeQuote.low }
+    : quotes.find(q => q.symbol === selectedSymbol);
 
   // Fetch candles using TanStack Query
   const { data: candles = [] } = useQuery({
@@ -339,7 +380,7 @@ export default function TradeIQDashboard() {
   }, [refetchQuotes]);
 
   // Loading screen state
-  const isQuotesLoaded = quotes.length > 0;
+  const isQuotesLoaded = mergedQuotes.length > 0 && mergedQuotes.some(q => q.price > 0);
   const isCandlesLoaded = candles.length > 0;
   const isStatusLoaded = !!marketStatus;
   const loadProgress = (
@@ -355,7 +396,7 @@ export default function TradeIQDashboard() {
     ? 'Loading chart data...'
     : 'Ready!';
 
-  const currentQuote = quotes.find(q => q.symbol === selectedSymbol);
+  // currentQuote is now computed above with real-time data
   const isLive = marketStatus?.isRealData && !marketStatus?.isFallback;
   const hasCoinGecko = marketStatus?.activeProviders?.includes('coingecko');
   const hasBinance = marketStatus?.activeProviders?.includes('binance');
@@ -530,7 +571,7 @@ export default function TradeIQDashboard() {
             <RefreshCw className="w-3 h-3" />
           </Button>
         </div>
-        <WatchlistPanel quotes={quotes} isLoading={isLoadingQuotes} />
+        <WatchlistPanel quotes={mergedQuotes} isLoading={isLoadingQuotes} />
       </div>
       {/* Vector Selector */}
       <div className="p-3 flex-1 overflow-y-auto custom-scrollbar">
@@ -547,7 +588,7 @@ export default function TradeIQDashboard() {
     <div className="flex flex-col h-full mb-safe-nav">
       {/* Watchlist Chips — mobile only */}
       <div className="px-2 pt-2 pb-1 border-b border-white/5">
-        <WatchlistPanel quotes={quotes} isLoading={isLoadingQuotes} compact />
+        <WatchlistPanel quotes={mergedQuotes} isLoading={isLoadingQuotes} compact />
       </div>
       {/* Chart area — takes remaining space */}
       <div className="flex-1 p-1.5 min-h-0 flex flex-col">
@@ -842,7 +883,7 @@ export default function TradeIQDashboard() {
             )}
           </div>
 
-          {/* Current Symbol Info */}
+          {/* Current Symbol Info — with real-time price indicator */}
           {currentQuote && currentQuote.price != null && (
             <div className="flex items-center gap-1 sm:gap-3">
               <span className="text-xs sm:text-sm font-bold">{currentQuote.symbol}</span>
@@ -852,6 +893,13 @@ export default function TradeIQDashboard() {
               <span className={`text-[10px] sm:text-xs font-mono ${(currentQuote.change ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                 {(currentQuote.change ?? 0) >= 0 ? '+' : ''}{(currentQuote.changePercent ?? 0).toFixed(2)}%
               </span>
+              {/* Real-time price indicator */}
+              {currentRealtimeQuote?.isRealtime && (
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                </span>
+              )}
             </div>
           )}
 

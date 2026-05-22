@@ -7,12 +7,11 @@
  * - Crypto: real-time trades
  * - Unlimited WS connections
  *
- * Finnhub WS docs: https://finnhub.io/docs/api/websocket-trades
+ * UPDATED: Now supports multi-symbol subscriptions.
+ * You can subscribe to multiple symbols simultaneously and receive
+ * individual trade updates per symbol.
  *
- * Usage:
- *   const ws = getFinnhubWS('YOUR_API_KEY');
- *   ws.subscribe('AAPL', (update) => { ... });
- *   ws.unsubscribe();
+ * Finnhub WS docs: https://finnhub.io/docs/api/websocket-trades
  */
 
 'use client';
@@ -70,6 +69,8 @@ class FinnhubWebSocket {
   };
   private stateCallbacks = new Set<StateCallback>();
   private tradeCallbacks = new Map<string, Set<TradeCallback>>();
+  /** Track all subscribed symbols for reconnection */
+  private subscribedSymbols = new Set<string>();
 
   // Reconnection
   private reconnectAttempts = 0;
@@ -83,9 +84,11 @@ class FinnhubWebSocket {
   private readonly KEEPALIVE_INTERVAL = 30_000; // Check every 30s
   private readonly KEEPALIVE_TIMEOUT = 60_000; // No message for 60s = dead
 
-  // Current candle aggregation
-  private currentCandle: Candle | null = null;
-  private currentCandleTime = 0;
+  // Candle aggregation per symbol
+  private candleAggregation = new Map<string, {
+    candle: Candle;
+    candleTime: number;
+  }>();
 
   constructor(apiKey: string) {
     if (!apiKey) throw new Error('Finnhub API key is required for WebSocket');
@@ -118,9 +121,11 @@ class FinnhubWebSocket {
       this.reconnectAttempts = 0;
       this.setState({ connectionState: 'connected', error: null });
 
-      // Re-subscribe if we had a symbol
-      if (this.state.symbol) {
-        this.sendSubscribe(this.state.symbol);
+      // Re-subscribe all symbols after connection
+      if (this.subscribedSymbols.size > 0) {
+        for (const symbol of this.subscribedSymbols) {
+          this.sendSubscribe(symbol);
+        }
       }
 
       this.startKeepalive();
@@ -169,7 +174,9 @@ class FinnhubWebSocket {
   }
 
   /**
-   * Subscribe to real-time trades for a symbol.
+   * Subscribe to real-time trades for a single symbol.
+   * The symbol is added to the subscription set and will be
+   * re-subscribed on reconnection.
    */
   subscribe(symbol: string, callback: TradeCallback): void {
     // Store callback
@@ -178,7 +185,8 @@ class FinnhubWebSocket {
     }
     this.tradeCallbacks.get(symbol)!.add(callback);
 
-    // Update state
+    // Track symbol
+    this.subscribedSymbols.add(symbol);
     this.setState({ symbol });
 
     // Connect if needed
@@ -190,16 +198,69 @@ class FinnhubWebSocket {
   }
 
   /**
-   * Unsubscribe from current symbol.
+   * Subscribe to multiple symbols at once.
+   * More efficient than calling subscribe() for each symbol
+   * because it only connects once.
+   */
+  subscribeMulti(symbols: string[], callback: TradeCallback): void {
+    // Store callbacks for all symbols
+    for (const symbol of symbols) {
+      if (!this.tradeCallbacks.has(symbol)) {
+        this.tradeCallbacks.set(symbol, new Set());
+      }
+      this.tradeCallbacks.get(symbol)!.add(callback);
+      this.subscribedSymbols.add(symbol);
+    }
+
+    this.setState({ symbol: symbols.join(',') });
+
+    // Connect if needed
+    if (!this.ws || this.ws.readyState === WebSocket.CLOSED) {
+      this.connect();
+    } else if (this.ws.readyState === WebSocket.OPEN) {
+      for (const symbol of symbols) {
+        this.sendSubscribe(symbol);
+      }
+    }
+  }
+
+  /**
+   * Unsubscribe from a specific symbol.
+   * If no symbols remain, disconnects.
+   */
+  unsubscribeSymbol(symbol: string): void {
+    // Remove callback for this symbol
+    this.tradeCallbacks.delete(symbol);
+    this.subscribedSymbols.delete(symbol);
+    this.candleAggregation.delete(symbol);
+
+    // Send unsubscribe to server
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.sendUnsubscribe(symbol);
+    }
+
+    // Update state
+    if (this.subscribedSymbols.size === 0) {
+      this.disconnect();
+    } else {
+      this.setState({ symbol: [...this.subscribedSymbols].join(',') });
+    }
+  }
+
+  /**
+   * Unsubscribe from all symbols.
    */
   unsubscribe(): void {
-    if (this.state.symbol && this.ws?.readyState === WebSocket.OPEN) {
-      this.sendUnsubscribe(this.state.symbol);
+    // Unsubscribe all symbols from server
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      for (const symbol of this.subscribedSymbols) {
+        this.sendUnsubscribe(symbol);
+      }
     }
 
     this.tradeCallbacks.clear();
-    this.currentCandle = null;
-    this.currentCandleTime = 0;
+    this.subscribedSymbols.clear();
+    this.candleAggregation.clear();
     this.setState({ symbol: null });
   }
 
@@ -228,6 +289,13 @@ class FinnhubWebSocket {
    */
   getState(): FinnhubWSState {
     return { ...this.state };
+  }
+
+  /**
+   * Get currently subscribed symbols.
+   */
+  getSubscribedSymbols(): Set<string> {
+    return new Set(this.subscribedSymbols);
   }
 
   /**
@@ -263,36 +331,40 @@ class FinnhubWebSocket {
       const callbacks = this.tradeCallbacks.get(symbol);
       if (!callbacks || callbacks.size === 0) continue;
 
-      // Aggregate into a 1-minute candle
+      // Aggregate into a 1-minute candle per symbol
       const tradeTime = Math.floor(trade.t / 1000); // ms → seconds
       const candleTime = Math.floor(tradeTime / 60) * 60; // Round to minute
 
-      if (candleTime !== this.currentCandleTime || this.currentCandle === null) {
-        // New candle period
-        this.currentCandle = {
-          time: candleTime,
-          open: trade.p,
-          high: trade.p,
-          low: trade.p,
-          close: trade.p,
-          volume: trade.v,
+      let agg = this.candleAggregation.get(symbol);
+
+      if (!agg || candleTime !== agg.candleTime) {
+        agg = {
+          candle: {
+            time: candleTime,
+            open: trade.p,
+            high: trade.p,
+            low: trade.p,
+            close: trade.p,
+            volume: trade.v,
+          },
+          candleTime,
         };
-        this.currentCandleTime = candleTime;
       } else {
-        // Update existing candle
-        this.currentCandle = {
+        agg.candle = {
           time: candleTime,
-          open: this.currentCandle.open,
-          high: Math.max(this.currentCandle.high, trade.p),
-          low: Math.min(this.currentCandle.low, trade.p),
+          open: agg.candle.open,
+          high: Math.max(agg.candle.high, trade.p),
+          low: Math.min(agg.candle.low, trade.p),
           close: trade.p,
-          volume: this.currentCandle.volume + trade.v,
+          volume: agg.candle.volume + trade.v,
         };
       }
 
+      this.candleAggregation.set(symbol, agg);
+
       const update: FinnhubTradeUpdate = {
         symbol,
-        candle: { ...this.currentCandle },
+        candle: { ...agg.candle },
         price: trade.p,
         volume: trade.v,
         source: 'trade',

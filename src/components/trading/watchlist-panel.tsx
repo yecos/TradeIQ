@@ -9,6 +9,8 @@ interface WatchlistQuote {
   price: number;
   change: number;
   changePercent: number;
+  /** Whether this price is from a live WebSocket */
+  isRealtime?: boolean;
 }
 
 interface WatchlistPanelProps {
@@ -57,6 +59,12 @@ export function WatchlistPanel({ quotes, isLoading, compact }: WatchlistPanelPro
                 className={`chip ${isSelected ? 'chip-active' : 'chip-inactive'}`}
               >
                 <span className="font-bold">{q.symbol}</span>
+                {q.isRealtime && (
+                  <span className="relative flex h-1.5 w-1.5 mr-0.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                  </span>
+                )}
                 <span className={`font-mono text-[10px] ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
                   {isPositive ? '+' : ''}{(q.changePercent ?? 0).toFixed(1)}%
                 </span>
@@ -102,7 +110,15 @@ export function WatchlistPanel({ quotes, isLoading, compact }: WatchlistPanelPro
                   }`}
                 />
                 <div className="min-w-0">
-                  <p className="text-xs font-bold text-white truncate">{q.symbol}</p>
+                  <div className="flex items-center gap-1">
+                    <p className="text-xs font-bold text-white truncate">{q.symbol}</p>
+                    {q.isRealtime && (
+                      <span className="relative flex h-1.5 w-1.5 flex-shrink-0">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                      </span>
+                    )}
+                  </div>
                   <p className="text-[10px] text-gray-500 truncate">{q.name}</p>
                 </div>
               </div>
