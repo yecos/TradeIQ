@@ -6,6 +6,7 @@ import { BinanceProvider, isCryptoSymbol } from './binance-provider';
 import { CoinGeckoProvider } from './coingecko-provider';
 import { FinnhubProvider } from './finnhub-provider';
 import { AlpacaProvider } from './alpaca-provider';
+import { TwelveDataProvider } from './twelvedata-provider';
 import { DataCache } from './market-data-interface';
 import { validateCandleArray, cleanCandleData, validateQuote, isPriceSane, isCandleDataStale } from './validator';
 
@@ -18,10 +19,15 @@ import { validateCandleArray, cleanCandleData, validateQuote, isPriceSane, isCan
  *                    → Mock (fallback)
  * - Stock/ETF symbols → Alpaca (if API keys set, real-time bars + broker)
  *                      → Finnhub (if API key set, covers stocks + forex)
+ *                      → TwelveData (if API key set, stocks + forex + indices)
  *                      → PolygonProvider (if API key set, stocks only)
  *                      → MockProvider
  * - Forex symbols → Finnhub (if API key set)
+ *                 → TwelveData (if API key set)
  *                 → MockProvider
+ * - Indices → TwelveData (if API key set, best indices support)
+ *           → Finnhub (if API key set)
+ *           → MockProvider
  * - Fallback: MockProvider for any symbol that fails
  *
  * CRITICAL: Crypto and stock fetches run IN PARALLEL to prevent
@@ -57,10 +63,12 @@ export class SmartProvider implements MarketDataProvider {
   private alpaca: AlpacaProvider | null = null;
   private finnhub: FinnhubProvider | null = null;
   private polygon: PolygonProvider | null = null;
+  private twelvedata: TwelveDataProvider | null = null;
   private mock: MockProvider;
   private hasAlpacaKey: boolean;
   private hasPolygonKey: boolean;
   private hasFinnhubKey: boolean;
+  private hasTwelveDataKey: boolean;
 
   // Cache for crypto quotes to avoid hitting APIs on every request
   private cryptoQuoteCache = new Map<string, { data: Quote; timestamp: number }>();
@@ -74,13 +82,14 @@ export class SmartProvider implements MarketDataProvider {
   // Track last known real prices to anchor mock candles when real candle data is unavailable
   private lastKnownPrices = new Map<string, number>();
 
-  constructor(polygonApiKey?: string, finnhubApiKey?: string, alpacaApiKey?: string, alpacaApiSecret?: string) {
+  constructor(polygonApiKey?: string, finnhubApiKey?: string, alpacaApiKey?: string, alpacaApiSecret?: string, twelvedataApiKey?: string) {
     this.coingecko = new CoinGeckoProvider();
     this.binance = new BinanceProvider();
     this.mock = new MockProvider();
     this.hasPolygonKey = Boolean(polygonApiKey && polygonApiKey.length > 0);
     this.hasFinnhubKey = Boolean(finnhubApiKey && finnhubApiKey.length > 0);
     this.hasAlpacaKey = Boolean(alpacaApiKey && alpacaApiSecret && alpacaApiKey.length > 0 && alpacaApiSecret.length > 0);
+    this.hasTwelveDataKey = Boolean(twelvedataApiKey && twelvedataApiKey.length > 0);
 
     if (this.hasAlpacaKey && alpacaApiKey && alpacaApiSecret) {
       try {
@@ -103,6 +112,14 @@ export class SmartProvider implements MarketDataProvider {
         this.finnhub = new FinnhubProvider(finnhubApiKey);
       } catch {
         console.warn('[TradeIQ] Failed to initialize Finnhub provider');
+      }
+    }
+
+    if (this.hasTwelveDataKey && twelvedataApiKey) {
+      try {
+        this.twelvedata = new TwelveDataProvider(twelvedataApiKey);
+      } catch {
+        console.warn('[TradeIQ] Failed to initialize Twelve Data provider');
       }
     }
   }
@@ -140,7 +157,7 @@ export class SmartProvider implements MarketDataProvider {
       return this.validateAndCleanCandles(candles, symbol, interval);
     }
 
-    // Stocks/Forex: Alpaca → Finnhub → Polygon → Mock
+    // Stocks/Forex: Alpaca → Finnhub → TwelveData → Polygon → Mock
     const providers = this.getStockProviders();
     const candles = await this.getCandlesWithFallback(symbol, days, interval, providers);
     if (providers[0] === this.mock) this.mockSymbols.add(symbol);
@@ -154,7 +171,7 @@ export class SmartProvider implements MarketDataProvider {
       return this.validateAndMarkQuote(quote);
     }
 
-    // Stocks/Forex: Alpaca → Finnhub → Polygon → Mock
+    // Stocks/Forex: Alpaca → Finnhub → TwelveData → Polygon → Mock
     const stockProviders = this.getStockProviders();
     for (const provider of stockProviders) {
       try {
@@ -297,6 +314,7 @@ export class SmartProvider implements MarketDataProvider {
     providers.push('binance'); // Secondary crypto
     if (this.hasAlpacaKey) providers.push('alpaca'); // Primary stocks (real-time)
     if (this.hasFinnhubKey) providers.push('finnhub');
+    if (this.hasTwelveDataKey) providers.push('twelvedata');
     if (this.hasPolygonKey) providers.push('polygon');
     providers.push('mock'); // Always available as fallback
     return providers;
@@ -309,8 +327,8 @@ export class SmartProvider implements MarketDataProvider {
   getDataQualityReport(): DataQualityReport {
     const warnings: string[] = [];
 
-    if (!this.hasAlpacaKey && !this.hasPolygonKey && !this.hasFinnhubKey) {
-      warnings.push('Stock data is simulated (no ALPACA, POLYGON_API_KEY or FINNHUB_API_KEY). Do NOT trade stocks based on this data.');
+    if (!this.hasAlpacaKey && !this.hasPolygonKey && !this.hasFinnhubKey && !this.hasTwelveDataKey) {
+      warnings.push('Stock data is simulated (no ALPACA, POLYGON_API_KEY, FINNHUB_API_KEY or TWELVEDATA_API_KEY). Do NOT trade stocks based on this data.');
     }
     if (this.mockSymbols.size > 0) {
       warnings.push(`${this.mockSymbols.size} symbol(s) using mock data: ${[...this.mockSymbols].slice(0, 5).join(', ')}`);
@@ -357,6 +375,13 @@ export class SmartProvider implements MarketDataProvider {
    */
   hasFinnhub(): boolean {
     return this.hasFinnhubKey;
+  }
+
+  /**
+   * Check if Twelve Data (stock/forex/index data) is available.
+   */
+  hasTwelveData(): boolean {
+    return this.hasTwelveDataKey;
   }
 
   /**
@@ -699,13 +724,14 @@ export class SmartProvider implements MarketDataProvider {
     const providers: MarketDataProvider[] = [];
     if (this.alpaca) providers.push(this.alpaca); // Primary — real-time bars + broker
     if (this.finnhub) providers.push(this.finnhub); // Secondary — stocks + forex
-    if (this.polygon) providers.push(this.polygon); // Tertiary — stocks only
+    if (this.twelvedata) providers.push(this.twelvedata); // Tertiary — stocks + forex + indices
+    if (this.polygon) providers.push(this.polygon); // Quaternary — stocks only
     providers.push(this.mock);
     return providers;
   }
 
   private getStockProvider(): MarketDataProvider {
-    return this.alpaca || this.finnhub || this.polygon || this.mock;
+    return this.alpaca || this.finnhub || this.twelvedata || this.polygon || this.mock;
   }
 
   /**

@@ -20,6 +20,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { getBinanceWS, isWSCompatible } from '@/lib/data/binance-ws';
 import { getAlpacaWS } from '@/lib/data/alpaca-ws';
+import { getFinnhubWS } from '@/lib/data/finnhub-ws';
+import { getTwelveDataWS } from '@/lib/data/twelvedata-ws';
 import type { Candle } from '@/lib/types';
 import type { WSConnectionState, WSState } from '@/lib/data/binance-ws';
 import type { AlpacaWSState } from '@/lib/data/alpaca-ws';
@@ -29,7 +31,7 @@ interface UseRealtimeCandlesResult {
   wsState: WSConnectionState;
   isRealtime: boolean;
   latencyMs: number | null;
-  wsProvider: 'binance' | 'alpaca' | 'none';
+  wsProvider: 'binance' | 'alpaca' | 'finnhub' | 'twelvedata' | 'none';
   currentPrice: number | null;
 }
 
@@ -179,14 +181,14 @@ export function useRealtimeCandles(
   const [mergedCandles, setMergedCandles] = useState<Candle[]>(historicalCandles);
   const [wsState, setWsState] = useState<WSConnectionState>('disconnected');
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
-  const [wsProvider, setWsProvider] = useState<'binance' | 'alpaca' | 'none'>('none');
+  const [wsProvider, setWsProvider] = useState<'binance' | 'alpaca' | 'finnhub' | 'twelvedata' | 'none'>('none');
   const [currentPrice, setCurrentPrice] = useState<number | null>(null);
 
   // ─── Refs for mutable state (avoid stale closures in WS callbacks) ───
   const candlesRef = useRef<Candle[]>(historicalCandles);
   const symbolRef = useRef(symbol);
   const timeframeRef = useRef(timeframe);
-  const wsProviderRef = useRef<'binance' | 'alpaca' | 'none'>('none');
+  const wsProviderRef = useRef<'binance' | 'alpaca' | 'finnhub' | 'twelvedata' | 'none'>('none');
 
   // rAF batching
   const rafRef = useRef<number | null>(null);
@@ -301,9 +303,7 @@ export function useRealtimeCandles(
     if (!alpacaWS) return;
 
     // GUARD: Don't re-subscribe if already connected to the same symbol+timeframe
-    // This prevents the reconnection loop when the component re-renders
     if (subscribedSymbolRef.current === symbol && subscribedTimeframeRef.current === timeframe) {
-      // Already subscribed — just update state tracking
       const state = alpacaWS.getState();
       if (state.connectionState === 'connected') {
         setWsState('connected');
@@ -348,6 +348,106 @@ export function useRealtimeCandles(
     };
   }, [symbol, timeframe, updateCandles]);
 
+  // ─── Finnhub WS for Stocks/Forex (fallback when Alpaca unavailable) ───
+  useEffect(() => {
+    if (!isStockSymbol(symbol)) return;
+    // Skip if Alpaca WS is already connected (prefer Alpaca over Finnhub)
+    if (isAlpacaAvailable() && wsProviderRef.current === 'alpaca') return;
+
+    const finnhubWS = getFinnhubWS();
+    if (!finnhubWS) return;
+
+    // GUARD: Don't re-subscribe if already connected
+    if (subscribedSymbolRef.current === symbol && subscribedTimeframeRef.current === timeframe) {
+      return;
+    }
+
+    wsProviderRef.current = 'finnhub';
+    subscribedSymbolRef.current = symbol;
+    subscribedTimeframeRef.current = timeframe;
+
+    finnhubWS.subscribe(symbol, (update) => {
+      if (update.symbol !== symbolRef.current) return;
+
+      const aggregatedCandle = aggregateAlpacaBar(update.candle, timeframeRef.current);
+      const result = mergeLiveCandle(candlesRef.current, aggregatedCandle, 'trade', 'alpaca');
+      updateCandles(result.candles);
+      setCurrentPrice(update.price);
+    });
+
+    const unsubState = finnhubWS.onStateChange((state) => {
+      // Map Finnhub WS states to WSConnectionState
+      const connState = state.connectionState === 'error' ? 'disconnected' : state.connectionState;
+      setWsState(connState as WSConnectionState);
+      if (state.lastMessageTime) {
+        setLatencyMs(Date.now() - state.lastMessageTime);
+      }
+      if (state.connectionState === 'connected' || state.connectionState === 'connecting' || state.connectionState === 'reconnecting') {
+        setWsProvider('finnhub');
+        wsProviderRef.current = 'finnhub';
+      }
+    });
+
+    return () => {
+      finnhubWS.unsubscribe();
+      unsubState();
+      setWsProvider('none');
+      wsProviderRef.current = 'none';
+      subscribedSymbolRef.current = null;
+      subscribedTimeframeRef.current = null;
+    };
+  }, [symbol, timeframe, updateCandles]);
+
+  // ─── Twelve Data WS for Stocks/Forex/Indices (fallback when others unavailable) ───
+  useEffect(() => {
+    if (!isStockSymbol(symbol)) return;
+    // Skip if Alpaca or Finnhub WS is already connected
+    if (wsProviderRef.current === 'alpaca' || wsProviderRef.current === 'finnhub') return;
+
+    const tdWS = getTwelveDataWS();
+    if (!tdWS) return;
+
+    // GUARD: Don't re-subscribe if already connected
+    if (subscribedSymbolRef.current === symbol && subscribedTimeframeRef.current === timeframe) {
+      return;
+    }
+
+    wsProviderRef.current = 'twelvedata';
+    subscribedSymbolRef.current = symbol;
+    subscribedTimeframeRef.current = timeframe;
+
+    tdWS.subscribe(symbol, (update) => {
+      if (update.symbol !== symbolRef.current) return;
+
+      const aggregatedCandle = aggregateAlpacaBar(update.candle, timeframeRef.current);
+      const result = mergeLiveCandle(candlesRef.current, aggregatedCandle, 'trade', 'alpaca');
+      updateCandles(result.candles);
+      setCurrentPrice(update.price);
+    });
+
+    const unsubState = tdWS.onStateChange((state) => {
+      // Map Twelve Data WS states to WSConnectionState
+      const connState = state.connectionState === 'error' ? 'disconnected' : state.connectionState;
+      setWsState(connState as WSConnectionState);
+      if (state.lastMessageTime) {
+        setLatencyMs(Date.now() - state.lastMessageTime);
+      }
+      if (state.connectionState === 'connected' || state.connectionState === 'connecting' || state.connectionState === 'reconnecting') {
+        setWsProvider('twelvedata');
+        wsProviderRef.current = 'twelvedata';
+      }
+    });
+
+    return () => {
+      tdWS.unsubscribe();
+      unsubState();
+      setWsProvider('none');
+      wsProviderRef.current = 'none';
+      subscribedSymbolRef.current = null;
+      subscribedTimeframeRef.current = null;
+    };
+  }, [symbol, timeframe, updateCandles]);
+
   // Ensure mergedCandles is always initialized from historical data
   useEffect(() => {
     if (historicalCandles.length > 0 && candlesRef.current.length === 0) {
@@ -360,7 +460,11 @@ export function useRealtimeCandles(
   useEffect(() => {
     const handleBeforeUnload = () => {
       if (isWSCompatible(symbol)) getBinanceWS().unsubscribe();
-      if (isStockSymbol(symbol) && isAlpacaAvailable()) getAlpacaWS()?.unsubscribe();
+      if (isStockSymbol(symbol)) {
+        if (isAlpacaAvailable()) getAlpacaWS()?.unsubscribe();
+        getFinnhubWS()?.unsubscribe();
+        getTwelveDataWS()?.unsubscribe();
+      }
     };
 
     window.addEventListener('beforeunload', handleBeforeUnload);
@@ -368,7 +472,11 @@ export function useRealtimeCandles(
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       if (isWSCompatible(symbol)) getBinanceWS().unsubscribe();
-      if (isStockSymbol(symbol) && isAlpacaAvailable()) getAlpacaWS()?.unsubscribe();
+      if (isStockSymbol(symbol)) {
+        if (isAlpacaAvailable()) getAlpacaWS()?.unsubscribe();
+        getFinnhubWS()?.unsubscribe();
+        getTwelveDataWS()?.unsubscribe();
+      }
     };
   }, [symbol]);
 

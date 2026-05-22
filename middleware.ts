@@ -61,7 +61,7 @@ const CSP_POLICY = [
   "style-src 'self' 'unsafe-inline'", // unsafe-inline needed for Tailwind
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",
-  "connect-src 'self' https://api.binance.com https://stream.binance.com:9443 wss://stream.binance.com:9443 https://api.alpaca.markets https://data.alpaca.markets wss://stream.data.alpaca.markets https://finnhub.io https://api.polygon.io https://api.coingecko.com https://pro-api.coingecko.com",
+  "connect-src 'self' https://api.binance.com https://stream.binance.com:9443 wss://stream.binance.com:9443 https://api.alpaca.markets https://data.alpaca.markets wss://stream.data.alpaca.markets wss://ws.finnhub.io https://finnhub.io https://api.twelvedata.com wss://ws.twelvedata.com https://api.polygon.io https://api.coingecko.com https://pro-api.coingecko.com",
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'",
