@@ -12,9 +12,10 @@ interface TradingChartProps {
   symbol: string;
   timeframe: string;
   onWSStateChange?: (state: 'disconnected' | 'connecting' | 'connected' | 'reconnecting', isRealtime: boolean, latencyMs: number | null) => void;
+  onPriceMismatch?: () => void;
 }
 
-export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: TradingChartProps) {
+export function TradingChart({ candles, symbol, timeframe, onWSStateChange, onPriceMismatch }: TradingChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candlestickSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
@@ -33,7 +34,15 @@ export function TradingChart({ candles, symbol, timeframe, onWSStateChange }: Tr
     isRealtime,
     latencyMs,
     currentPrice,
+    priceMismatch,
   } = useRealtimeCandles(candles, symbol, timeframe);
+
+  // Report price mismatch to parent (triggers candle re-fetch)
+  useEffect(() => {
+    if (priceMismatch) {
+      onPriceMismatch?.();
+    }
+  }, [priceMismatch, onPriceMismatch]);
 
   // Report WS state to parent
   useEffect(() => {

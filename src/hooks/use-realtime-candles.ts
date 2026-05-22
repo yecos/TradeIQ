@@ -20,7 +20,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { getBinanceWS, isWSCompatible } from '@/lib/data/binance-ws';
 import { getAlpacaWS } from '@/lib/data/alpaca-ws';
-import { getFinnhubWS } from '@/lib/data/finnhub-ws';
+import { getFinnhubWS, getFinnhubWSAsync } from '@/lib/data/finnhub-ws';
 import { getTwelveDataWS } from '@/lib/data/twelvedata-ws';
 import type { Candle } from '@/lib/types';
 import type { WSConnectionState, WSState } from '@/lib/data/binance-ws';
@@ -33,6 +33,8 @@ interface UseRealtimeCandlesResult {
   latencyMs: number | null;
   wsProvider: 'binance' | 'alpaca' | 'finnhub' | 'twelvedata' | 'none';
   currentPrice: number | null;
+  /** True when WS price doesn't match historical candles — triggers a re-fetch */
+  priceMismatch: boolean;
 }
 
 /**
@@ -183,6 +185,7 @@ export function useRealtimeCandles(
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
   const [wsProvider, setWsProvider] = useState<'binance' | 'alpaca' | 'finnhub' | 'twelvedata' | 'none'>('none');
   const [currentPrice, setCurrentPrice] = useState<number | null>(null);
+  const [priceMismatch, setPriceMismatch] = useState(false);
 
   // ─── Refs for mutable state (avoid stale closures in WS callbacks) ───
   const candlesRef = useRef<Candle[]>(historicalCandles);
@@ -200,6 +203,9 @@ export function useRealtimeCandles(
 
   // Track key for reset detection
   const prevKeyRef = useRef(`${symbol}:${timeframe}`);
+
+  // Track if we've already checked for price mismatch on this symbol
+  const mismatchCheckedRef = useRef(false);
 
   // ─── rAF-batched state update ────────────────────────────────────
   // Batches React state updates to 60fps using requestAnimationFrame.
@@ -249,6 +255,8 @@ export function useRealtimeCandles(
       candlesRef.current = historicalCandles;
       setMergedCandles(historicalCandles);
       setCurrentPrice(null);
+      setPriceMismatch(false);
+      mismatchCheckedRef.current = false;
       dirtyRef.current = false;
     } else {
       // Same symbol/timeframe — smart merge to preserve WS updates
@@ -257,6 +265,30 @@ export function useRealtimeCandles(
       setMergedCandles(merged);
     }
   }, [currentKey, historicalCandles]);
+
+  // ─── Price Mismatch Detection ────────────────────────────────────
+  // When the first WS message arrives, compare the real price with the
+  // last historical candle's close. If they differ by >5%, the historical
+  // data is likely from mock (fake) and needs to be re-fetched.
+  const checkPriceMismatch = useCallback((wsPrice: number) => {
+    if (mismatchCheckedRef.current) return;
+    mismatchCheckedRef.current = true;
+
+    const candles = candlesRef.current;
+    if (candles.length === 0) return;
+
+    const lastClose = candles[candles.length - 1].close;
+    const diffPercent = Math.abs(wsPrice - lastClose) / lastClose;
+
+    if (diffPercent > 0.05) { // >5% difference → likely mock data
+      console.warn(
+        `[TradeIQ] Price mismatch detected! WS=$${wsPrice.toFixed(2)} vs candle=$${lastClose.toFixed(2)} (${(diffPercent * 100).toFixed(1)}% diff). Historical candles are likely fake.`
+      );
+      setPriceMismatch(true);
+    } else {
+      setPriceMismatch(false);
+    }
+  }, []);
 
   // ─── Binance WS for Crypto ───────────────────────────────────────
   useEffect(() => {
@@ -271,6 +303,9 @@ export function useRealtimeCandles(
       if (update.symbol !== symbolRef.current || update.interval !== timeframeRef.current) {
         return;
       }
+
+      // Check for price mismatch on first WS message
+      checkPriceMismatch(update.candle.close);
 
       const result = mergeLiveCandle(candlesRef.current, update.candle, 'bar', 'binance');
       updateCandles(result.candles);
@@ -354,43 +389,64 @@ export function useRealtimeCandles(
     // Skip if Alpaca WS is already connected (prefer Alpaca over Finnhub)
     if (isAlpacaAvailable() && wsProviderRef.current === 'alpaca') return;
 
-    const finnhubWS = getFinnhubWS();
-    if (!finnhubWS) return;
+    // Use async key resolution: tries NEXT_PUBLIC_FINNHUB_KEY first,
+    // then fetches from /api/finnhub/key (server-side env passthrough)
+    let cancelled = false;
 
-    // GUARD: Don't re-subscribe if already connected
-    if (subscribedSymbolRef.current === symbol && subscribedTimeframeRef.current === timeframe) {
-      return;
+    async function initFinnhubWS() {
+      const finnhubWS = await getFinnhubWSAsync();
+      if (!finnhubWS || cancelled) return;
+
+      // GUARD: Don't re-subscribe if already connected
+      if (subscribedSymbolRef.current === symbol && subscribedTimeframeRef.current === timeframe) {
+        return;
+      }
+
+      wsProviderRef.current = 'finnhub';
+      subscribedSymbolRef.current = symbol;
+      subscribedTimeframeRef.current = timeframe;
+
+      finnhubWS.subscribe(symbol, (update) => {
+        if (update.symbol !== symbolRef.current) return;
+
+        // Check for price mismatch on first WS message
+        checkPriceMismatch(update.price);
+
+        const aggregatedCandle = aggregateAlpacaBar(update.candle, timeframeRef.current);
+        const result = mergeLiveCandle(candlesRef.current, aggregatedCandle, 'trade', 'alpaca');
+        updateCandles(result.candles);
+        setCurrentPrice(update.price);
+      });
+
+      const unsubState = finnhubWS.onStateChange((state) => {
+        // Map Finnhub WS states to WSConnectionState
+        const connState = state.connectionState === 'error' ? 'disconnected' : state.connectionState;
+        setWsState(connState as WSConnectionState);
+        if (state.lastMessageTime) {
+          setLatencyMs(Date.now() - state.lastMessageTime);
+        }
+        if (state.connectionState === 'connected' || state.connectionState === 'connecting' || state.connectionState === 'reconnecting') {
+          setWsProvider('finnhub');
+          wsProviderRef.current = 'finnhub';
+        }
+      });
+
+      // Store cleanup for this specific subscription
+      return { finnhubWS, unsubState };
     }
 
-    wsProviderRef.current = 'finnhub';
-    subscribedSymbolRef.current = symbol;
-    subscribedTimeframeRef.current = timeframe;
+    let cleanup: { finnhubWS: any; unsubState: () => void } | undefined;
 
-    finnhubWS.subscribe(symbol, (update) => {
-      if (update.symbol !== symbolRef.current) return;
-
-      const aggregatedCandle = aggregateAlpacaBar(update.candle, timeframeRef.current);
-      const result = mergeLiveCandle(candlesRef.current, aggregatedCandle, 'trade', 'alpaca');
-      updateCandles(result.candles);
-      setCurrentPrice(update.price);
-    });
-
-    const unsubState = finnhubWS.onStateChange((state) => {
-      // Map Finnhub WS states to WSConnectionState
-      const connState = state.connectionState === 'error' ? 'disconnected' : state.connectionState;
-      setWsState(connState as WSConnectionState);
-      if (state.lastMessageTime) {
-        setLatencyMs(Date.now() - state.lastMessageTime);
-      }
-      if (state.connectionState === 'connected' || state.connectionState === 'connecting' || state.connectionState === 'reconnecting') {
-        setWsProvider('finnhub');
-        wsProviderRef.current = 'finnhub';
-      }
+    initFinnhubWS().then((result) => {
+      cleanup = result;
     });
 
     return () => {
-      finnhubWS.unsubscribe();
-      unsubState();
+      cancelled = true;
+      if (cleanup) {
+        cleanup.finnhubWS.unsubscribe();
+        cleanup.unsubState();
+      }
       setWsProvider('none');
       wsProviderRef.current = 'none';
       subscribedSymbolRef.current = null;
@@ -418,6 +474,9 @@ export function useRealtimeCandles(
 
     tdWS.subscribe(symbol, (update) => {
       if (update.symbol !== symbolRef.current) return;
+
+      // Check for price mismatch on first WS message
+      checkPriceMismatch(update.price);
 
       const aggregatedCandle = aggregateAlpacaBar(update.candle, timeframeRef.current);
       const result = mergeLiveCandle(candlesRef.current, aggregatedCandle, 'trade', 'alpaca');
@@ -489,5 +548,6 @@ export function useRealtimeCandles(
     latencyMs,
     wsProvider,
     currentPrice,
+    priceMismatch,
   };
 }

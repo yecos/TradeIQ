@@ -434,10 +434,36 @@ class FinnhubWebSocket {
 // ─── Singleton ───────────────────────────────────────────────────────
 
 let finnhubWSInstance: FinnhubWebSocket | null = null;
+let finnhubKeyPromise: Promise<string | null> | null = null;
+
+/**
+ * Fetch the Finnhub API key from the server-side API route.
+ * This allows the WS to work even when NEXT_PUBLIC_FINNHUB_KEY is not set
+ * (the key can be FINNHUB_API_KEY on the server instead).
+ * Caches the result so we only fetch once.
+ */
+async function fetchFinnhubKey(): Promise<string | null> {
+  if (finnhubKeyPromise) return finnhubKeyPromise;
+
+  finnhubKeyPromise = (async () => {
+    try {
+      const res = await fetch('/api/finnhub/key');
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data.key || null;
+    } catch {
+      return null;
+    }
+  })();
+
+  return finnhubKeyPromise;
+}
 
 /**
  * Get the Finnhub WebSocket singleton.
  * Returns null if no API key is available.
+ *
+ * Checks: apiKey param → NEXT_PUBLIC_FINNHUB_KEY (client env) → /api/finnhub/key (server env)
  */
 export function getFinnhubWS(apiKey?: string): FinnhubWebSocket | null {
   const key = apiKey || (typeof window !== 'undefined' ? process.env.NEXT_PUBLIC_FINNHUB_KEY : undefined);
@@ -453,6 +479,27 @@ export function getFinnhubWS(apiKey?: string): FinnhubWebSocket | null {
   }
 
   return finnhubWSInstance;
+}
+
+/**
+ * Get Finnhub WS with async key resolution.
+ * Tries NEXT_PUBLIC_FINNHUB_KEY first, then fetches from /api/finnhub/key.
+ * Use this in useEffect hooks that can handle async initialization.
+ */
+export async function getFinnhubWSAsync(): Promise<FinnhubWebSocket | null> {
+  // Try direct key first
+  const directKey = typeof window !== 'undefined' ? process.env.NEXT_PUBLIC_FINNHUB_KEY : undefined;
+  if (directKey) {
+    return getFinnhubWS(directKey);
+  }
+
+  // Try fetching from API
+  const fetchedKey = await fetchFinnhubKey();
+  if (fetchedKey) {
+    return getFinnhubWS(fetchedKey);
+  }
+
+  return null;
 }
 
 /**

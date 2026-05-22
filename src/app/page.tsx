@@ -207,7 +207,7 @@ export default function TradeIQDashboard() {
     : quotes.find(q => q.symbol === selectedSymbol);
 
   // Fetch candles using TanStack Query
-  const { data: candles = [] } = useQuery({
+  const { data: candles = [], refetch: refetchCandles } = useQuery({
     queryKey: ['candles', selectedSymbol, timeframe],
     queryFn: async () => {
       try {
@@ -229,6 +229,12 @@ export default function TradeIQDashboard() {
     retry: 1,
     staleTime: isRealtimeWS ? 60000 : 10000,
   });
+
+  // Handle price mismatch: WS price doesn't match historical candles → re-fetch
+  const handlePriceMismatch = useCallback(() => {
+    console.warn('[TradeIQ] Price mismatch detected — re-fetching candles from API...');
+    refetchCandles();
+  }, [refetchCandles]);
 
   // Symbol search with debounce
   const searchSymbols = useCallback(async (query: string) => {
@@ -610,7 +616,7 @@ export default function TradeIQDashboard() {
         </div>
         {/* Chart Container */}
         <div className="flex-1 rounded-lg overflow-hidden trading-card min-h-0">
-          <TradingChart candles={candles} symbol={selectedSymbol} timeframe={timeframe} onWSStateChange={handleWSStateChange} />
+          <TradingChart candles={candles} symbol={selectedSymbol} timeframe={timeframe} onWSStateChange={handleWSStateChange} onPriceMismatch={handlePriceMismatch} />
         </div>
       </div>
       {/* Bottom Analysis Summary Bar (mobile) */}
@@ -1004,7 +1010,7 @@ export default function TradeIQDashboard() {
             </div>
             {/* Chart Container */}
             <div className="flex-1 rounded-lg overflow-hidden trading-card min-h-0">
-              <TradingChart candles={candles} symbol={selectedSymbol} timeframe={timeframe} onWSStateChange={handleWSStateChange} />
+              <TradingChart candles={candles} symbol={selectedSymbol} timeframe={timeframe} onWSStateChange={handleWSStateChange} onPriceMismatch={handlePriceMismatch} />
             </div>
           </div>
 

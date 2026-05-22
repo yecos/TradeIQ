@@ -244,19 +244,17 @@ export class BinanceProvider implements MarketDataProvider {
     // Now we estimate how many candles fit in `days` based on the interval.
     const limit = Math.min(estimateCandleCount(days, interval), 1000); // Binance max 1000 per request
 
-    // For intraday intervals, also calculate the start time so Binance returns
-    // candles from the correct lookback window (not just the latest `limit` candles)
+    // Calculate the start time so Binance returns candles from the correct lookback window.
+    // Use the actual desired start time (not limit-based calculation).
+    // This ensures we get the most recent data when limit is capped at 1000.
     const now = Date.now();
-    const intervalMs = intervalToMs(interval);
     const startMs = now - days * 86400_000;
-    const startParam = `&startTime=${now - limit * intervalMs}`;
 
     const data = await this.fetchFromBinance<BinanceKline[]>(
-      `/api/v3/klines?symbol=${pair}&interval=${binanceInterval}&limit=${limit}${startParam}`
+      `/api/v3/klines?symbol=${pair}&interval=${binanceInterval}&limit=${limit}&startTime=${startMs}`
     );
 
     const candles: Candle[] = data
-      .filter((k) => k[0] >= startMs) // Only include candles within the requested range
       .map((k) => ({
         time: Math.floor(k[0] / 1000), // Open time in ms → seconds
         open: parseFloat(k[1]),

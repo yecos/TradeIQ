@@ -34,8 +34,8 @@ export function getMarketDataProvider(): SmartProvider {
   if (providerInstance && !fallbackToMock) return providerInstance;
 
   const polygonApiKey = process.env.POLYGON_API_KEY;
-  const finnhubApiKey = process.env.FINNHUB_API_KEY;
-  const twelvedataApiKey = process.env.TWELVEDATA_API_KEY;
+  const finnhubApiKey = process.env.FINNHUB_API_KEY || process.env.NEXT_PUBLIC_FINNHUB_KEY;
+  const twelvedataApiKey = process.env.TWELVEDATA_API_KEY || process.env.NEXT_PUBLIC_TWELVEDATA_KEY;
   // Server-side: use NEXT_PUBLIC_ vars (same keys, also accessible server-side)
   // or dedicated server-only ALPACA_API_KEY / ALPACA_API_SECRET if set
   const alpacaApiKey = process.env.ALPACA_API_KEY || process.env.NEXT_PUBLIC_ALPACA_API_KEY;

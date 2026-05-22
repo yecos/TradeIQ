@@ -146,14 +146,12 @@ export class SmartProvider implements MarketDataProvider {
     }
 
     if (isCryptoSymbol(symbol)) {
-      // For daily/weekly crypto: MERGE CoinGecko (deep history) + Binance (real-time today)
-      if (['1D', '1W'].includes(interval)) {
-        const candles = await this.getCandlesMerged(symbol, days, interval);
-        return this.validateAndCleanCandles(candles, symbol, interval);
-      }
-      // For intraday crypto, try Binance first (CoinGecko free doesn't support intraday)
-      const providers = [this.binance, this.coingecko, this.mock];
-      const candles = await this.getCandlesWithFallback(symbol, days, interval, providers);
+      // CRITICAL FIX: Binance-first for ALL crypto intervals.
+      // Previously, daily/weekly used CoinGecko primary (slow, often times out) → mock fallback.
+      // This caused fake candles that didn't match real-time WS prices.
+      // Now: Binance is always primary (fast, free, accurate, no API key needed).
+      // CoinGecko is only used as a merge partner for deep history on daily+ intervals.
+      const candles = await this.getCryptoCandlesBinanceFirst(symbol, days, interval);
       return this.validateAndCleanCandles(candles, symbol, interval);
     }
 
@@ -399,6 +397,87 @@ export class SmartProvider implements MarketDataProvider {
   }
 
   // --- Private helpers ---
+
+  /**
+   * Binance-first crypto candle fetching.
+   *
+   * Strategy:
+   * 1. Binance klines (primary) — fast, free, accurate, real-time.
+   *    Supports all intervals, up to 1000 candles per request.
+   * 2. If Binance succeeds AND it's a daily/weekly interval, try CoinGecko
+   *    for deep history in parallel and merge (Binance for recent, CoinGecko for old).
+   * 3. If Binance fails, try CoinGecko solo.
+   * 4. If both fail, try to anchor mock to a real quote price.
+   *
+   * This replaces the old logic where CoinGecko was primary for daily/weekly
+   * (often timing out → mock fallback → fake candles that don't match WS prices).
+   */
+  private async getCryptoCandlesBinanceFirst(symbol: string, days: number, interval: string): Promise<Candle[]> {
+    // Step 1: Try Binance first
+    const binanceResult = await withTimeout(
+      this.binance.getCandles(symbol, days, interval),
+      PROVIDER_TIMEOUT,
+      `Binance.getCandles(${symbol}, ${interval})`
+    );
+
+    if (binanceResult && binanceResult.length > 0) {
+      this.lastKnownPrices.set(symbol.toUpperCase(), binanceResult[binanceResult.length - 1].close);
+      this.mock.setLastKnownPrice(symbol, binanceResult[binanceResult.length - 1].close);
+
+      // Step 2: For daily/weekly, try CoinGecko for deep history and merge
+      if (['1D', '1W'].includes(interval) && days > 30) {
+        const cgResult = await withTimeout(
+          this.coingecko.getCandles(symbol, days, interval),
+          PROVIDER_TIMEOUT,
+          `CoinGecko.getCandles(${symbol}, ${interval})`
+        );
+
+        if (cgResult && cgResult.length > binanceResult.length) {
+          // CoinGecko has deeper history — merge (Binance for recent, CG for old)
+          const merged = this.mergeCandleData(cgResult, binanceResult);
+          console.warn(`[TradeIQ] Crypto candles for ${symbol}: CG=${cgResult.length}, BIN=${binanceResult.length} → merged=${merged.length}`);
+          return merged.slice(-days * (interval === '1D' ? 1 : 1));
+        }
+      }
+
+      // Binance data is sufficient — use it directly
+      console.warn(`[TradeIQ] Crypto candles from Binance for ${symbol}: ${binanceResult.length} candles (${interval})`);
+      return binanceResult;
+    }
+
+    // Step 3: Binance failed — try CoinGecko
+    console.warn(`[TradeIQ] Binance failed for ${symbol} candles, trying CoinGecko...`);
+    const cgResult = await withTimeout(
+      this.coingecko.getCandles(symbol, days, interval),
+      PROVIDER_TIMEOUT,
+      `CoinGecko.getCandles(${symbol}, ${interval})`
+    );
+
+    if (cgResult && cgResult.length > 0) {
+      this.lastKnownPrices.set(symbol.toUpperCase(), cgResult[cgResult.length - 1].close);
+      this.mock.setLastKnownPrice(symbol, cgResult[cgResult.length - 1].close);
+      return cgResult;
+    }
+
+    // Step 4: Both failed — anchor mock to a real quote
+    console.warn(`[TradeIQ] Both Binance and CoinGecko failed for ${symbol} candles, anchoring mock to real quote...`);
+    try {
+      const quote = await withTimeout(
+        this.getCryptoQuote(symbol),
+        5000,
+        `quickCryptoQuote(${symbol})`
+      );
+      if (quote?.price) {
+        this.mock.setLastKnownPrice(symbol, quote.price);
+        this.lastKnownPrices.set(symbol.toUpperCase(), quote.price);
+        console.warn(`[TradeIQ] Anchored mock candles for ${symbol} to real price $${quote.price}`);
+      }
+    } catch {
+      // Quote also failed — use default seed price
+    }
+
+    return this.mock.getCandles(symbol, days, interval);
+  }
 
   /**
    * Fetch stock quotes — tries Polygon first, falls back to Mock (instant).

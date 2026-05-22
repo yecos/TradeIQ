@@ -20,7 +20,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { getBinanceTickerWS, type BinanceMiniTicker } from '@/lib/data/binance-ticker-ws';
-import { getFinnhubWS, type FinnhubTradeUpdate } from '@/lib/data/finnhub-ws';
+import { getFinnhubWS, getFinnhubWSAsync, type FinnhubTradeUpdate } from '@/lib/data/finnhub-ws';
 import { getTwelveDataWS, type TwelveDataPriceUpdate } from '@/lib/data/twelvedata-ws';
 import type { Quote } from '@/lib/types';
 
@@ -221,30 +221,43 @@ export function useRealtimeWatchlistPrices(
     const stockSymbols = watchlist.filter(s => !isCrypto(s));
     if (stockSymbols.length === 0) return;
 
-    const finnhubWS = getFinnhubWS();
-    if (!finnhubWS) return;
+    let cancelled = false;
+    let cleanupFinnhub: { ws: any; unsubState: () => void } | undefined;
 
-    const handleTrade = (update: FinnhubTradeUpdate) => {
-      updatePrice(update.symbol, update.price, 'finnhub', {
-        open: update.candle.open,
-        high: update.candle.high,
-        low: update.candle.low,
-        volume: update.candle.volume,
+    async function initFinnhub() {
+      // Use async key resolution (supports both NEXT_PUBLIC_ and server-side env)
+      const finnhubWS = await getFinnhubWSAsync();
+      if (!finnhubWS || cancelled) return;
+
+      const handleTrade = (update: FinnhubTradeUpdate) => {
+        updatePrice(update.symbol, update.price, 'finnhub', {
+          open: update.candle.open,
+          high: update.candle.high,
+          low: update.candle.low,
+          volume: update.candle.volume,
+        });
+      };
+
+      // Use multi-symbol subscribe
+      finnhubWS.subscribeMulti(stockSymbols, handleTrade);
+
+      const unsubState = finnhubWS.onStateChange((state) => {
+        finnhubConnectedRef.current = state.connectionState === 'connected';
+        dirtyRef.current = true;
+        scheduleStateUpdate();
       });
-    };
 
-    // Use multi-symbol subscribe
-    finnhubWS.subscribeMulti(stockSymbols, handleTrade);
+      cleanupFinnhub = { ws: finnhubWS, unsubState };
+    }
 
-    const unsubState = finnhubWS.onStateChange((state) => {
-      finnhubConnectedRef.current = state.connectionState === 'connected';
-      dirtyRef.current = true;
-      scheduleStateUpdate();
-    });
+    initFinnhub();
 
     return () => {
-      finnhubWS.unsubscribe();
-      unsubState();
+      cancelled = true;
+      if (cleanupFinnhub) {
+        cleanupFinnhub.ws.unsubscribe();
+        cleanupFinnhub.unsubState();
+      }
       finnhubConnectedRef.current = false;
     };
   }, [watchlist, updatePrice, scheduleStateUpdate]);
@@ -255,7 +268,7 @@ export function useRealtimeWatchlistPrices(
     if (stockSymbols.length === 0) return;
 
     // Skip if Finnhub is available (prefer Finnhub over TwelveData)
-    if (getFinnhubWS()) return;
+    if (finnhubConnectedRef.current) return;
 
     const tdWS = getTwelveDataWS();
     if (!tdWS) return;
